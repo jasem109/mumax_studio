@@ -2,6 +2,16 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.4.3
+
+- **The left panel docks like the others.** Setup, Geometry, Drive, Script, Files and Help now sit in a panel
+  that can be resized by dragging its edge, moved by dragging its title, minimised, maximised or closed. The
+  section buttons on the far left bring it back when it is closed, and it is also listed in the Panels menu.
+  Layouts saved by earlier versions get it back on the left.
+- **Fewer colours.** One warm accent now marks actions, selection, sliders and focus; everything else is
+  neutral. Red and green are kept only for errors and success. Plot lines and the magnetisation colour
+  wheel are unchanged.
+
 ## 0.4.2
 
 - **Tidier Claude panel.** The long instructions are gone. The panel opens with one line and three example

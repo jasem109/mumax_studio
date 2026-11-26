@@ -82,6 +82,7 @@
       <summary class="iconbtn" title="Panels and layouts" aria-label="Panels and layouts"><svg><use href="#i-panels"/></svg></summary>
       <div class="menubody" id="panelMenu" role="menu">
         <div class="mhead">Panels</div>
+        <button role="menuitemcheckbox" data-open="side">Setup pages (Setup, Geometry, Drive, Script, Files, Help)</button>
         <button role="menuitemcheckbox" data-open="view">Viewer (3D field, OVF player, geometry)</button>
         <button role="menuitemcheckbox" data-open="plot">Table plot</button>
         <button role="menuitemcheckbox" data-open="console">Console</button>
@@ -115,7 +116,9 @@
     <button class="railbtn" data-tab="help" title="Reference"><svg><use href="#i-help"/></svg><span>Help</span></button>
   </nav>
 
-  <section class="panel side" aria-label="Simulation setup">
+  <div class="dock" id="dock">
+  <section class="panel side" data-panel="side" aria-label="Simulation setup">
+    <div class="toolbar"><span class="vtitle" id="sideTitle">Setup</span></div>
     <!-- ======================= Setup ======================= -->
     <div class="page active" id="page-setup">
       <header class="pagehead"><h2>Setup</h2><p>Material, starting state and what to record. Mesh and shape are under <a href="#" data-goto="geometry">Geometry</a>, fields and currents under <a href="#" data-goto="drive">Drive</a>.</p></header>
@@ -378,7 +381,6 @@ print(magnet.magnetization.average())</pre>
     </div>
   </section>
 
-  <div class="dock" id="dock">
   <!-- ======================= viewer: 3D field / OVF player / geometry ======================= -->
   <section class="panel view3d" data-panel="view" aria-label="Viewer">
     <div class="toolbar">

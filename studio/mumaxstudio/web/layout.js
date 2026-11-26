@@ -5,18 +5,21 @@
    Splitters resize, the title-bar buttons minimise, maximise and close; closed panels come back from the
    Panels menu. The layout is kept in localStorage and in the studio settings file. */
 const LAYOUT = (() => {
+  // "side" is the Setup / Geometry / Drive / Script / Files / Help pages, on the left by default
+  const withSide = (t, f = 0.27) => ({ dir: "row", sizes: [f, 1 - f], kids: ["side", t] });
   const PRESETS = {
-    standard: { dir: "row", sizes: [0.58, 0.42], kids: [
+    standard: withSide({ dir: "row", sizes: [0.58, 0.42], kids: [
       { dir: "col", sizes: [0.7, 0.3], kids: ["view", "console"] },
-      { dir: "col", sizes: [0.5, 0.5], kids: ["plot", "assistant"] }] },
-    viewer: { dir: "row", sizes: [0.7, 0.3], kids: ["view",
-      { dir: "col", sizes: [0.55, 0.45], kids: ["plot", "console"] }] },
-    analysis: { dir: "col", sizes: [0.6, 0.4], kids: [
+      { dir: "col", sizes: [0.5, 0.5], kids: ["plot", "assistant"] }] }),
+    viewer: withSide({ dir: "row", sizes: [0.7, 0.3], kids: ["view",
+      { dir: "col", sizes: [0.55, 0.45], kids: ["plot", "console"] }] }, 0.24),
+    analysis: withSide({ dir: "col", sizes: [0.6, 0.4], kids: [
       { dir: "row", sizes: [0.55, 0.45], kids: ["view", "plot"] },
-      { dir: "row", sizes: [0.6, 0.4], kids: ["console", "assistant"] }] },
-    assistant: { dir: "row", sizes: [0.36, 0.64], kids: ["assistant",
-      { dir: "col", sizes: [0.62, 0.38], kids: ["view", { dir: "row", sizes: [0.5, 0.5], kids: ["plot", "console"] }] }] },
+      { dir: "row", sizes: [0.6, 0.4], kids: ["console", "assistant"] }] }),
+    assistant: withSide({ dir: "row", sizes: [0.36, 0.64], kids: ["assistant",
+      { dir: "col", sizes: [0.62, 0.38], kids: ["view", { dir: "row", sizes: [0.5, 0.5], kids: ["plot", "console"] }] }] }),
   };
+  const LAYOUT_VERSION = 2;
   let dock, panels = {}, tree = null, collapsed = new Set(), maxed = null, onChange = () => {}, saveRemote = () => {};
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -81,7 +84,8 @@ const LAYOUT = (() => {
   }
   function open(id) {
     if (leaves(tree).includes(id)) { flash(id); return; }
-    tree = normalise({ dir: "row", sizes: [0.7, 0.3], kids: [tree, id] });
+    tree = normalise(id === "side" ? { dir: "row", sizes: [0.27, 0.73], kids: [id, tree] }
+      : { dir: "row", sizes: [0.7, 0.3], kids: [tree, id] });
     commit();
     flash(id);
   }
@@ -262,7 +266,7 @@ const LAYOUT = (() => {
   // ---------------------------------------------------------------- persistence
   function commit(rerender = true) {
     tree = normalise(tree);
-    const st = { tree, collapsed: [...collapsed] };
+    const st = { v: LAYOUT_VERSION, tree, collapsed: [...collapsed] };
     try { localStorage.setItem("studioLayout", JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
     clearTimeout(commit.t);
     commit.t = setTimeout(() => saveRemote(st), 600);
@@ -271,6 +275,8 @@ const LAYOUT = (() => {
   function apply(st) {
     if (st && st.tree && valid(st.tree)) {
       tree = normalise(clone(st.tree));
+      // layouts saved before the setup pages were a panel: put them back on the left
+      if ((st.v || 1) < 2 && !leaves(tree).includes("side")) tree = normalise(withSide(tree));
       collapsed = new Set((st.collapsed || []).filter((id) => panels[id]));
       return true;
     }

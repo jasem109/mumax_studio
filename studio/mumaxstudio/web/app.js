@@ -104,8 +104,11 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
 let page = "setup";
 $$(".railbtn").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 $$("[data-goto]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchTab(a.dataset.goto); }));
+const PAGE_TITLES = { setup: "Setup", geometry: "Geometry", drive: "Drive", script: "Script", files: "Files", help: "Help" };
 function switchTab(name) {
   page = name;
+  $("#sideTitle").textContent = PAGE_TITLES[name] || name;
+  if (typeof LAYOUT !== "undefined" && LAYOUT.isOpen && !LAYOUT.isOpen("side")) LAYOUT.open("side");
   $$(".railbtn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + name));
   if (name === "files") loadFiles();
