@@ -1,7 +1,9 @@
 "use strict";
 /* 3D field viewer (WebGL 2, no libraries). Shows a vector field as arrows, cones or cells, coloured with the
    mumax3 colour wheel (hue = in-plane angle, white = +z, black = -z) or by one component.
-   Sources: the running simulation (live), OVF files from the workspace, or OVF files dropped on the panel.
+   Sources: the running simulation (live), OVF files from the output folder, or OVF files dropped on the panel.
+   Geometry mode shows the magnet of the Geometry page as cells coloured by region; the field shown before is
+   kept aside meanwhile and comes back when geometry mode ends.
    Several files form a sequence that can be played back. Orbit with the left button, pan with the right
    button or Shift+drag, zoom with the wheel. */
 const VIEW3D = (() => {
@@ -12,6 +14,8 @@ const VIEW3D = (() => {
   const opt = { glyph: "arrow", color: "wheel", stride: 1, size: 1, slice: [[0, 1], [0, 1], [0, 1]], outline: true, light: true };
   let listeners = {};
   let liveSource = false;
+  let geoOn = false, saved = null;     // geometry mode: the field / source that was showing before
+  const glyph = () => (geoOn ? "cube" : opt.glyph);
 
   // ---------------------------------------------------------------- glyph meshes (unit length along +z, centred)
   function cylinder(r0, r1, z0, z1, n, out) {
@@ -65,7 +69,7 @@ const VIEW3D = (() => {
   layout(location=3) in vec4 iVec;   // xyz: direction (unit), w: colour scalar in [-1, 1] or |v| / max
   uniform mat4 uPV;
   uniform vec3 uScale;      // glyph size (world units) for x, y, z of the glyph frame
-  uniform int uMode;        // 0 wheel, 1 scalar, 2 magnitude
+  uniform int uMode;        // 0 wheel, 1 scalar, 2 magnitude, 3 region number (w = region + 1)
   uniform int uAlign;       // 1: rotate the glyph to the vector, 0: axis-aligned (cells)
   out vec3 vNor; out vec3 vCol;
   vec3 hsl(float h, float s, float l) {
@@ -98,6 +102,12 @@ const VIEW3D = (() => {
       float h = atan(d.y, d.x) / 6.2831853;
       vCol = hsl(fract(h), 1.0, clamp(0.5 + 0.5 * d.z, 0.0, 1.0));
     } else if (uMode == 1) vCol = diverging(iVec.w);
+    else if (uMode == 3) {
+      vec3 pal[8] = vec3[8](vec3(0.18, 0.31, 0.85), vec3(0.64, 0.28, 0.12), vec3(0.11, 0.50, 0.29), vec3(0.55, 0.25, 0.70),
+                            vec3(0.05, 0.52, 0.60), vec3(0.75, 0.54, 0.12), vec3(0.84, 0.27, 0.24), vec3(0.36, 0.49, 0.98));
+      int r = int(iVec.w + 0.5) - 1;
+      vCol = r <= 0 ? vec3(0.62, 0.60, 0.56) : pal[(r - 1) % 8];
+    }
     else vCol = seq(iVec.w);
     gl_Position = uPV * vec4(p, 1.0);
   }`;
@@ -213,7 +223,7 @@ const VIEW3D = (() => {
           out[k + 2] = ((iz + 0.5) * f.cell[2]) / world - extent[2] / 2;
           if (nc >= 3) { out[k + 3] = vx / n; out[k + 4] = vy / n; out[k + 5] = vz / n; }
           else { out[k + 3] = 0; out[k + 4] = 0; out[k + 5] = 1; }
-          out[k + 6] = nc === 1 ? f.data[i] / vmax : comp >= 0 ? [vx, vy, vz][comp] / vmax : n / vmax;
+          out[k + 6] = geoOn ? f.data[i] : nc === 1 ? f.data[i] / vmax : comp >= 0 ? [vx, vy, vz][comp] / vmax : n / vmax;
           sum[0] += vx; sum[1] += vy; sum[2] += vz; cnt++;
           k += 7;
         }
@@ -248,7 +258,7 @@ const VIEW3D = (() => {
   }
   function bindGlyph() {
     gl.bindVertexArray(vao);
-    const g = glyphBuf[opt.glyph];
+    const g = glyphBuf[glyph()];
     gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0); gl.vertexAttribDivisor(0, 0);
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12); gl.vertexAttribDivisor(1, 0);
@@ -286,17 +296,17 @@ const VIEW3D = (() => {
       const f = field, st = Math.max(1, opt.stride | 0);
       const cs = [f.cell[0] * st / world, f.cell[1] * st / world, f.cell[2] * (f.nz > 64 ? st : 1) / world];
       let sc;
-      if (opt.glyph === "cube") sc = cs.map((v) => v * 0.98 * Math.min(1, opt.size));
+      if (glyph() === "cube") sc = cs.map((v) => v * (geoOn ? 0.96 : 0.98 * Math.min(1, opt.size)));
       else { const s = Math.min(cs[0], cs[1]) * 0.95 * opt.size; sc = [s, s, s]; }
       gl.uniform3fv(gl.getUniformLocation(prog, "uScale"), sc);
-      gl.uniform1i(gl.getUniformLocation(prog, "uMode"), field.ncomp === 1 ? 1 : opt.color === "wheel" ? 0 : opt.color === "mag" ? 2 : 1);
-      gl.uniform1i(gl.getUniformLocation(prog, "uAlign"), opt.glyph === "cube" ? 0 : 1);
+      gl.uniform1i(gl.getUniformLocation(prog, "uMode"), geoOn ? 3 : field.ncomp === 1 ? 1 : opt.color === "wheel" ? 0 : opt.color === "mag" ? 2 : 1);
+      gl.uniform1i(gl.getUniformLocation(prog, "uAlign"), glyph() === "cube" ? 0 : 1);
       gl.uniform1i(gl.getUniformLocation(prog, "uLight"), opt.light ? 1 : 0);
       const ld = [e[0] - cam.tx + 0.4, e[1] - cam.ty - 0.3, e[2] - cam.tz + 1.2];
       const ll = Math.hypot(...ld);
       gl.uniform3fv(gl.getUniformLocation(prog, "uLightDir"), ld.map((v) => v / ll));
       gl.bindVertexArray(vao);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, glyphBuf[opt.glyph].n, nInst);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, glyphBuf[glyph()].n, nInst);
       gl.bindVertexArray(null);
     }
     if (opt.outline) {
@@ -358,7 +368,7 @@ const VIEW3D = (() => {
   function setFrames(list, keepIndex = false) {
     frames = list;
     cur = keepIndex ? Math.min(cur, frames.length - 1) : 0;
-    liveSource = false;
+    if (geoOn) saved = { field: saved && saved.field, live: false }; else liveSource = false;
     showFrame(cur);
     emit("frames");
   }
@@ -368,6 +378,7 @@ const VIEW3D = (() => {
     const fr = frames[cur];
     try {
       if (!fr.field) fr.field = await fr.load();
+      if (geoOn) { saved = { field: fr.field, live: false }; emit("frames"); return; }
       const first = !field || field.nx !== fr.field.nx || field.ny !== fr.field.ny || field.nz !== fr.field.nz;
       field = fr.field;
       build();
@@ -392,6 +403,7 @@ const VIEW3D = (() => {
   async function loadLive(api) {
     const buf = await api("/api/field3d?q=" + encodeURIComponent(document.getElementById("v3quantity").value || "m"), { binary: true });
     const f = OVF.fromStudio(buf);
+    if (geoOn) { saved = { field: f, live: true }; frames = []; cur = -1; return; }
     const first = !field || !liveSource || field.nx !== f.nx || field.ny !== f.ny || field.nz !== f.nz;
     field = f; liveSource = true;
     frames = []; cur = -1;
@@ -409,6 +421,26 @@ const VIEW3D = (() => {
       name: p.split("/").pop(), path: p,
       load: async () => OVF.parse(await (await api("/api/file?path=" + encodeURIComponent(p), { blob: true })).arrayBuffer(), p.split("/").pop()),
     })));
+  }
+
+  // ---------------------------------------------------------------- geometry mode
+  function geometry(on, f) {
+    if (on) {
+      if (!geoOn) { saved = { field, live: liveSource }; geoOn = true; field = null; nInst = 0; }
+      if (f && f !== field) {
+        const first = !field || field.nx !== f.nx || field.ny !== f.ny || field.nz !== f.nz;
+        field = f;
+        build();
+        if (first) viewFrom("iso");
+      }
+    } else if (geoOn) {
+      geoOn = false;
+      field = saved ? saved.field : null;
+      liveSource = saved ? saved.live : false;
+      saved = null;
+      build();
+      if (field) viewFrom("iso");
+    }
   }
 
   // ---------------------------------------------------------------- misc
@@ -436,8 +468,9 @@ const VIEW3D = (() => {
     draw();
   }
   return {
-    init, draw, build, on, info, play, showFrame, viewFrom, loadLive, addLocalFiles, addWorkspaceFiles, status,
-    opt, get playing() { return playing; }, get hasField() { return !!field; }, get live() { return liveSource; },
+    init, draw, build, on, info, play, showFrame, viewFrom, loadLive, addLocalFiles, addWorkspaceFiles, status, geometry,
+    opt, get playing() { return playing; }, get hasField() { return geoOn ? !!(saved && saved.field) : !!field; },
+    get live() { return geoOn ? !!(saved && saved.live) : liveSource; },
     png(cb) { draw(); canvas.toBlob(cb); },
   };
 })();

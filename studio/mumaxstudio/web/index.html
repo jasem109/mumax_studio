@@ -35,6 +35,8 @@
     <symbol id="i-open" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1M4 7v10a2 2 0 0 0 2 2h11.5l3-8H7.5l-3 8"/></symbol>
     <symbol id="i-step-back" viewBox="0 0 24 24"><path d="M17 6 9 12l8 6zM7 6v12"/></symbol>
     <symbol id="i-step-fwd" viewBox="0 0 24 24"><path d="m7 6 8 6-8 6zM17 6v12"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
   </defs>
 </svg>
@@ -44,10 +46,13 @@
     <img src="icon.svg" alt="" width="20" height="20">
     <span class="brand-name">mumax<span class="brand-sep">/</span>studio</span>
   </div>
-  <label class="jobname" title="Simulation name: outputs go to &lt;name&gt;.out in the workspace">
+  <label class="jobname" title="Simulation name: the run writes &lt;name&gt;.out in the output folder">
     <span class="sr-only">Simulation name</span>
     <input id="jobName" value="untitled" spellcheck="false" autocomplete="off">
   </label>
+  <button class="folderchip" id="btnFolder" type="button" title="Output folder: click to choose where simulations and scripts are saved">
+    <svg><use href="#i-folder"/></svg><span class="fc-lbl">saves to</span><span class="fc-path" id="outPath">…</span>
+  </button>
   <div class="transport" role="group" aria-label="Simulation control">
     <button id="btnRun" class="tbtn run" title="Run the script (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Run</span></button>
     <button id="btnPause" class="tbtn" title="Pause / resume" disabled><svg><use href="#i-pause"/></svg><span>Pause</span></button>
@@ -77,14 +82,13 @@
       <summary class="iconbtn" title="Panels and layouts" aria-label="Panels and layouts"><svg><use href="#i-panels"/></svg></summary>
       <div class="menubody" id="panelMenu" role="menu">
         <div class="mhead">Panels</div>
-        <button role="menuitemcheckbox" data-open="view">2D field view</button>
-        <button role="menuitemcheckbox" data-open="view3d">3D field view and OVF player</button>
+        <button role="menuitemcheckbox" data-open="view">Viewer (3D field, OVF player, geometry)</button>
         <button role="menuitemcheckbox" data-open="plot">Table plot</button>
         <button role="menuitemcheckbox" data-open="console">Console</button>
         <button role="menuitemcheckbox" data-open="assistant">Claude assistant</button>
         <div class="mhead">Layouts</div>
         <button data-preset="standard">Standard</button>
-        <button data-preset="viewer">Two viewers</button>
+        <button data-preset="viewer">Large viewer</button>
         <button data-preset="analysis">Analysis</button>
         <button data-preset="assistant">Writing with Claude</button>
         <p class="mnote">Drag a panel by its title to move it. Drag the gaps between panels to resize them.</p>
@@ -94,6 +98,13 @@
   </div>
 </header>
 
+<div id="splash" class="splash" aria-hidden="true">
+  <img src="icon.svg" alt="">
+  <div class="sp-name">mumax Studio</div>
+  <div class="sp-ver" id="splashVer">&nbsp;</div>
+  <div class="sp-msg">loading…</div>
+  <div class="sp-bar"><i></i></div>
+</div>
 <main class="layout">
   <nav class="rail" aria-label="Sections">
     <button class="railbtn active" data-tab="setup" title="Material, initial state, run"><svg><use href="#i-setup"/></svg><span>Setup</span></button>
@@ -275,7 +286,7 @@
         <select id="selLang" title="Script language"><option value="mx3">mumax3 .mx3</option><option value="py">Python .py</option></select>
         <select id="selExample" title="Load an example"><option value="">Examples…</option></select>
         <label class="btn small filebtn">Open…<input type="file" id="fileOpen" accept=".mx3,.py,.txt"></label>
-        <button class="btn small" id="btnDownloadScript" title="Download the script">Save</button>
+        <button class="btn small" id="btnDownloadScript" title="Save the script: shows the full path first, you can change it">Save…</button>
         <button class="btn small primary" id="btnGenerate" title="Write the script from Setup, Geometry and Drive">Generate from forms</button>
       </div>
       <div class="editor" id="editorWrap">
@@ -293,8 +304,11 @@
       <div class="toolbar">
         <button class="btn small" id="btnRefreshFiles"><svg><use href="#i-refresh"/></svg>Refresh</button>
         <label class="btn small filebtn">Upload…<input type="file" id="fileUpload" multiple accept=".stl,.png,.jpg,.csv,.txt,.dat,.ovf,.mx3,.py,.npy"></label>
-        <span class="muted small path" id="wsPath"></span>
+        <button class="btn small" id="btnChangeFolder" type="button" title="Choose another output folder"><svg><use href="#i-folder"/></svg>Folder…</button>
+        <button class="btn small" id="btnOpenFolder" type="button" title="Open the output folder in the file manager" hidden>Open</button>
+        <button class="btn small danger" id="btnDeleteSel" type="button" title="Delete the ticked files and folders" disabled><svg><use href="#i-trash"/></svg>Delete</button>
       </div>
+      <div class="wsline"><span class="muted small">Output folder</span> <span class="small path mono" id="wsPath"></span></div>
       <div id="fileList" class="filelist"></div>
     </div>
 
@@ -308,7 +322,7 @@
         <ol>
           <li><b>Geometry</b>: set the mesh and build the magnet from shapes, imported STL models, images or your own <code>inside(x, y, z)</code> code.</li>
           <li><b>Setup</b>: material, initial state, what to record. <b>Drive</b>: fields and currents with any pulse shape.</li>
-          <li>Press <b>Run</b>. The script is generated (see the <b>Script</b> page) and runs on the chosen device. Ctrl+Enter runs whatever is in the editor.</li>
+          <li>Press <b>Run</b>. Before it starts, the app shows where the results go (<code>&lt;folder&gt;\&lt;name&gt;.out</code>); the folder chip in the top bar changes it. The script is generated (see the <b>Script</b> page) and runs on the chosen device. Ctrl+Enter runs whatever is in the editor.</li>
           <li>While it runs, type commands in the console, e.g. <code>B_ext = vector(0, 0, 0.1)</code>, <code>Save(m)</code>, <code>Run(1e-9)</code>.</li>
         </ol>
         <h3>Pulse and waveform functions</h3>
@@ -349,8 +363,10 @@ magnet.msat, magnet.aex, magnet.alpha = 800e3, 13e-12, 0.02
 magnet.magnetization = (1, 0.1, 0)
 magnet.minimize()
 print(magnet.magnetization.average())</pre>
-        <h3>3D view and OVF files</h3>
-        <p>Open the 3D panel from the Panels menu. It shows the running simulation, or OVF files: drop one or more files on it, use <b>OVF…</b>, or press <b>3D</b> next to a snapshot on the Files page (the other snapshots in that folder become frames you can play). Drag to orbit, right-drag or Shift-drag to pan, scroll to zoom. <b>Slice</b> crops the box and thins the glyphs.</p>
+        <h3>Viewer and OVF files</h3>
+        <p>There is one viewer, in 3D. It follows the running simulation live, or plays OVF files: drop one or more files on it, use <b>OVF…</b>, or press <b>view</b> next to a snapshot on the Files page (the other snapshots in that folder become frames you can play). Drag to orbit, right-drag or Shift-drag to pan, scroll to zoom; <b>top</b> gives the familiar 2D picture of a film. <b>Slice</b> crops the box and thins the glyphs. While the Geometry page is open the viewer shows the magnet being built: <b>2D edit</b> to drag shapes on one layer, <b>3D</b> to see the whole body coloured by region.</p>
+        <h3>Files, folders and deleting</h3>
+        <p>The Files page lists the output folder. Tick files or whole <code>.out</code> folders and press <b>Delete</b>, or use the bin button on a row. Deleting cannot be undone. The output of a run that is still going is protected until you stop it.</p>
         <h3>Claude</h3>
         <p>The Claude panel writes scripts from a description, fixes a failing script, explains one or reviews its physics. It uses Claude Code when it is installed and signed in (Claude Pro or Max subscription), or an Anthropic API key. To let Claude Desktop or Claude Code run simulations themselves, register the MCP server once:</p>
         <pre>claude mcp add mumax-studio -- mumax-studio mcp</pre>
@@ -363,46 +379,33 @@ print(magnet.magnetization.average())</pre>
   </section>
 
   <div class="dock" id="dock">
-  <!-- ======================= 2D viewer ======================= -->
-  <section class="panel viewer" data-panel="view" aria-label="2D field view">
+  <!-- ======================= viewer: 3D field / OVF player / geometry ======================= -->
+  <section class="panel view3d" data-panel="view" aria-label="Viewer">
     <div class="toolbar">
-      <span class="vtitle" id="viewTitle">Field</span>
-      <select id="selQuantity" title="Quantity"><option value="m">m</option></select>
-      <select id="selComp" title="Component">
-        <option value="v">colour wheel</option><option value="0">x</option><option value="1">y</option><option value="2">z</option>
-      </select>
-      <label class="small layerctl">z <input type="range" id="layer" min="0" max="0" value="0"><output id="layerVal">0</output></label>
-      <label class="check small"><input type="checkbox" id="chkArrows" checked> arrows</label>
-      <label class="check small"><input type="checkbox" id="chkAuto" checked> live</label>
-      <span class="spacer"></span>
-      <button class="iconbtn" id="btnRefreshView" title="Refresh now" aria-label="Refresh"><svg><use href="#i-refresh"/></svg></button>
-      <button class="iconbtn" id="btnSavePng" title="Save image" aria-label="Save image"><svg><use href="#i-image"/></svg></button>
-    </div>
-    <div class="canvaswrap" id="viewWrap" tabindex="0">
-      <canvas id="view"></canvas>
-      <div class="legend" id="legend"><canvas id="legendCanvas" width="120" height="120"></canvas><div id="legendText"></div></div>
-      <div class="empty" id="viewEmpty"><p><b>Nothing to show yet.</b><br>Build a geometry or press <b>Run</b>.</p></div>
-    </div>
-    <div class="infoline small" id="viewInfo">&nbsp;</div>
-  </section>
-
-  <!-- ======================= 3D viewer / OVF player ======================= -->
-  <section class="panel view3d" data-panel="view3d" aria-label="3D field view">
-    <div class="toolbar">
-      <span class="vtitle">3D</span>
+      <span class="vtitle" id="viewTitle">Viewer</span>
+      <span class="geoctl" id="geoCtl" hidden>
+        <span class="seg" role="group" aria-label="Geometry view">
+          <button type="button" data-geoview="2d" title="Top view of one layer: drag shapes to move them">2D edit</button><button type="button" data-geoview="3d" title="The whole magnet in 3D, coloured by region">3D</button>
+        </span>
+        <label class="small layerctl" id="layerCtl">z <input type="range" id="layer" min="0" max="0" value="0"><output id="layerVal">0</output></label>
+      </span>
+      <span class="v3ctl" id="v3ctl">
       <select id="v3source" title="What to show" aria-label="Source">
         <option value="live">Live simulation</option>
         <option value="files">Files</option>
       </select>
       <select id="v3quantity" title="Quantity (live)" aria-label="Quantity"><option value="m">m</option></select>
       <label class="filebtn btn small" title="Open .ovf files from this computer (several files make a sequence)"><svg><use href="#i-open"/></svg>OVF…<input type="file" id="v3files" accept=".ovf" multiple></label>
+      </span>
+      <span class="v3ctl" id="v3style">
       <select id="v3glyph" title="Glyph" aria-label="Glyph">
         <option value="arrow">arrows</option><option value="cone">cones</option><option value="cube">cells</option>
       </select>
       <select id="v3color" title="Colour" aria-label="Colour">
         <option value="wheel">colour wheel</option><option value="x">x</option><option value="y">y</option><option value="z">z</option><option value="mag">|v|</option>
       </select>
-      <details class="menu right">
+      </span>
+      <details class="menu right" id="v3slice">
         <summary class="btn small" title="Density, size and slicing">Slice</summary>
         <div class="menubody slicebox">
           <label>every <input type="number" id="v3stride" min="1" max="64" value="1"> cells</label>
@@ -418,14 +421,15 @@ print(magnet.magnetization.average())</pre>
         </div>
       </details>
       <span class="spacer"></span>
-      <div class="seg" role="group" aria-label="Camera">
+      <div class="seg" role="group" aria-label="Camera" id="v3cam">
         <button type="button" data-cam="iso" title="Perspective">3D</button><button type="button" data-cam="top" title="From +z">top</button><button type="button" data-cam="front" title="From −y">front</button><button type="button" data-cam="side" title="From +x">side</button>
       </div>
       <button class="iconbtn" id="v3refresh" title="Reload" aria-label="Reload"><svg><use href="#i-refresh"/></svg></button>
       <button class="iconbtn" id="v3png" title="Save image" aria-label="Save image"><svg><use href="#i-image"/></svg></button>
     </div>
-    <div class="canvaswrap" id="v3wrap">
+    <div class="canvaswrap" id="v3wrap" tabindex="0">
       <canvas id="view3d"></canvas>
+      <canvas id="view" hidden></canvas>
       <div class="v3legend" id="v3legend"></div>
       <div class="empty" id="v3empty"><p><b>No field loaded.</b><br>Run a simulation, open .ovf files, or drop them here.<br><span class="muted">Several files play as a sequence.</span></p></div>
       <div class="v3status" id="v3status" hidden></div>
@@ -445,8 +449,14 @@ print(magnet.magnetization.average())</pre>
   <section class="panel plot" data-panel="plot" aria-label="Table plot">
     <div class="toolbar">
       <span class="vtitle">Table</span>
-      <label class="small">x <select id="selX"></select></label>
-      <div id="yCols" class="ycols small"></div>
+      <details class="menu right" id="yMenu">
+        <summary class="btn small" id="yBtn" title="Which columns to plot (one or more)">plot: <span id="yLabel">–</span> ▾</summary>
+        <div class="menubody ymenu">
+          <div class="ymhead small"><b>Plot (y axis)</b><span class="spacer"></span><button class="btn small" id="yNone" type="button">none</button></div>
+          <div id="yCols" class="ycols small"></div>
+        </div>
+      </details>
+      <label class="small">against <select id="selX" title="The x axis"></select></label>
       <span class="spacer"></span>
       <button class="btn small" id="btnCsv" title="Download the table as CSV">CSV</button>
     </div>
@@ -474,11 +484,19 @@ print(magnet.magnetization.average())</pre>
       <span class="vtitle">Claude</span>
       <span class="small muted" id="asStatus">checking…</span>
       <span class="spacer"></span>
+      <button class="btn small" id="asUsageBtn" type="button" title="How much of your Claude plan's usage limits is used" hidden>Usage</button>
       <select id="asBackend" title="How to reach Claude" aria-label="Connection">
         <option value="auto">automatic</option>
         <option value="cli">Claude Code (subscription)</option>
         <option value="api">API key</option>
       </select>
+    </div>
+    <div class="ausage" id="asUsage" hidden>
+      <div class="auhead"><b>Claude plan usage</b> <span class="small muted" id="asUsagePlan"></span><span class="spacer"></span>
+        <button class="btn small" id="asUsageRefresh" type="button" title="Ask Claude Code for the current figures (a one-word request to the smallest model)">Refresh</button>
+        <button class="btn small icon" id="asUsageClose" type="button" title="Close" aria-label="Close">×</button></div>
+      <div id="asUsageBody" class="small"></div>
+      <div class="aufoot small"><span class="muted" id="asAccount"></span><span class="spacer"></span><button class="btn small" id="asSignOut" type="button" title="Sign out of Claude on this computer">Sign out</button></div>
     </div>
     <div class="alog" id="asLog">
       <div class="aempty" id="asEmpty">
@@ -489,12 +507,23 @@ print(magnet.magnetization.average())</pre>
           <button class="btn small" id="asConnCode" type="button">Connect Claude Code</button></p>
       </div>
       <div class="asetup" id="asSetup" hidden>
-        <h4>Connect Claude</h4>
-        <p><b>With a Claude Pro or Max subscription:</b> install Claude Code from <code>claude.com/claude-code</code>, open a terminal, run <code>claude</code> once and sign in. Then press <i>Check again</i>.</p>
-        <p><b>With an Anthropic API key:</b> <span id="asSdkNote">run <code>pip install anthropic</code> first, then</span> paste the key here. It is stored in your user folder on this computer only.</p>
-        <div class="keyrow"><input id="asKey" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="API key"><button class="btn small" id="asSaveKey" type="button">Save key</button><button class="btn small" id="asClearKey" type="button">Remove</button></div>
-        <p class="small muted" id="asKeyState"></p>
+        <h4>Authorize Claude</h4>
+        <p>The assistant works after you sign in with a <b>Claude Pro or Max</b> account. mumax Studio reaches Claude through Claude Code, so the requests count against your plan and no API key is needed.</p>
+        <ol class="asteps">
+          <li id="asStepCli"><span class="astate"></span><b>Install Claude Code.</b>
+            <span id="asCliHelp">Windows (PowerShell): <code>irm https://claude.ai/install.ps1 | iex</code> · macOS / Linux: <code>curl -fsSL https://claude.ai/install.sh | bash</code> · see <code>claude.com/claude-code</code>. Then press <i>Check again</i>.</span></li>
+          <li id="asStepAuth"><span class="astate"></span><b>Sign in with your Claude account.</b>
+            <span id="asAuthHelp">A window opens for the sign-in; choose your Pro or Max account in the browser.</span>
+            <div><button class="btn primary small" id="asLogin" type="button">Sign in with Claude</button></div></li>
+        </ol>
+        <p class="small" id="asAuthMsg"></p>
+        <p class="small" id="asOtherAcct" hidden><button class="btn small" id="asSignOut2" type="button">Sign out of this account</button></p>
         <button class="btn small" id="asRecheck" type="button">Check again</button>
+        <details class="akey"><summary class="small">Use an Anthropic API key instead</summary>
+          <p class="small"><span id="asSdkNote">Run <code>pip install anthropic</code> first, then</span> paste the key here. It is stored in your user folder on this computer only, and requests are billed to the API account.</p>
+          <div class="keyrow"><input id="asKey" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="API key"><button class="btn small" id="asSaveKey" type="button">Save key</button><button class="btn small" id="asClearKey" type="button">Remove</button></div>
+          <p class="small muted" id="asKeyState"></p>
+        </details>
       </div>
     </div>
     <div class="acompose">
@@ -504,7 +533,7 @@ print(magnet.magnetization.average())</pre>
         <label><input type="radio" name="asMode" value="explain"><span>Explain</span></label>
         <label><input type="radio" name="asMode" value="improve"><span>Review</span></label>
       </div>
-      <textarea id="asInput" rows="3" placeholder="Describe the simulation, e.g. “Switch a 40 nm CoFeB disk with a 2 ns spin-orbit torque pulse, JSOT = 1e12 A/m², and record mz.”"></textarea>
+      <textarea id="asInput" rows="3" disabled placeholder="Describe the simulation, e.g. “Switch a 40 nm CoFeB disk with a 2 ns spin-orbit torque pulse, JSOT = 1e12 A/m², and record mz.”"></textarea>
       <div class="arow">
         <label class="check small" id="asScriptRow"><input type="checkbox" id="asScript"> include the current script</label>
         <label class="check small"><input type="checkbox" id="asLog2"> include the run log</label>
@@ -523,6 +552,43 @@ print(magnet.magnetization.average())</pre>
     <p>Open the link printed in the terminal, or paste the token here.</p>
     <input id="tokenInput" placeholder="token">
     <button class="btn primary" id="tokenOk">Connect</button>
+  </div>
+</div>
+<div class="modal" id="folderModal" hidden role="dialog" aria-modal="true" aria-labelledby="folderTitle">
+  <div class="card wide">
+    <h3 id="folderTitle">Output folder</h3>
+    <p class="warn" id="folderNeed" hidden>Choose where the results of your simulations are saved. Simulations can run only after an output folder is set.</p>
+    <p class="small">Each run writes its results to <code>&lt;name&gt;.out</code> inside this folder and keeps a copy of the script next to it. Uploads and the Files page use the same folder. The choice is remembered.</p>
+    <label class="small">Folder
+      <div class="pathrow"><input id="folderInput" spellcheck="false" autocomplete="off" placeholder="D:\simulations"><button class="btn small" id="folderBrowse" type="button" hidden>Browse…</button></div>
+    </label>
+    <div class="recent" id="folderRecent"></div>
+    <label class="check small"><input type="checkbox" id="folderAsk" checked> Show the paths and ask before every run</label>
+    <p class="small err" id="folderErr" hidden></p>
+    <div class="acts"><button class="btn small" id="folderDefault" type="button">Default</button><span class="spacer"></span><button class="btn small" id="folderCancel" type="button">Cancel</button><button class="btn small primary" id="folderOk" type="button">Use this folder</button></div>
+  </div>
+</div>
+<div class="modal" id="runModal" hidden role="dialog" aria-modal="true" aria-labelledby="runTitle">
+  <div class="card wide">
+    <h3 id="runTitle">Run <span id="runName"></span></h3>
+    <dl class="pathlist">
+      <dt>Results</dt><dd class="mono" id="runOut"></dd>
+      <dt>Script copy</dt><dd class="mono" id="runScript"></dd>
+    </dl>
+    <p class="small warn" id="runWarn" hidden></p>
+    <label class="check small"><input type="checkbox" id="runNoAsk"> Don't ask again (the path stays visible in the top bar)</label>
+    <div class="acts"><button class="btn small" id="runFolder" type="button"><svg><use href="#i-folder"/></svg>Change folder…</button><span class="spacer"></span><button class="btn small" id="runCancel" type="button">Cancel</button><button class="btn small primary" id="runOk" type="button">Run</button></div>
+  </div>
+</div>
+<div class="modal" id="saveModal" hidden role="dialog" aria-modal="true" aria-labelledby="saveTitle">
+  <div class="card wide">
+    <h3 id="saveTitle">Save script</h3>
+    <label class="small">Save as
+      <div class="pathrow"><input id="saveInput" spellcheck="false" autocomplete="off"><button class="btn small" id="saveBrowse" type="button" hidden>Browse…</button></div>
+    </label>
+    <p class="small muted">A full path saves anywhere on this computer; a bare file name saves in the output folder.</p>
+    <p class="small err" id="saveErr" hidden></p>
+    <div class="acts"><button class="btn small" id="saveDownload" type="button" title="Let the browser download a copy instead">Download copy</button><span class="spacer"></span><button class="btn small" id="saveCancel" type="button">Cancel</button><button class="btn small primary" id="saveOk" type="button">Save</button></div>
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>

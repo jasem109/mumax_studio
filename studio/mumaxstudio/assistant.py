@@ -2,9 +2,11 @@
 
 Two ways to reach Claude, chosen automatically (or by the user in the GUI):
 
-* **Claude subscription (Pro / Max)** through Claude Code: the `claude` command must be installed and signed in once
-  (`claude` in a terminal, then /login). Requests run as `claude -p` with no tools, so Claude only writes text.
-  Usage counts against the subscription; no API key is involved.
+* **Claude subscription (Pro / Max)** through Claude Code: the `claude` command must be installed, and the user must
+  authorize it with a Claude Pro or Max account (the panel's "Sign in with Claude" opens `claude auth login`).
+  Until then the panel stays locked. Requests run as `claude -p` with no tools, so Claude only writes text. Usage
+  counts against the subscription; the plan's usage limits (5-hour session and weekly window, in percent) are read
+  from the rate-limit event that Claude Code reports with every answer, and shown on request.
 * **Anthropic API key** through the official `anthropic` Python SDK (`pip install anthropic`). The key comes from
   ANTHROPIC_API_KEY or is stored by the GUI in ~/.mumaxstudio/config.json (readable only by the user on POSIX).
 
@@ -17,6 +19,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import time
 
 MODEL = "claude-opus-5-5"
 CONFIG = os.path.join(os.path.expanduser("~"), ".mumaxstudio", "config.json")
@@ -112,19 +116,132 @@ def find_claude_cli():
     return None
 
 
-def status():
+NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+SUBSCRIPTION_PLANS = ("pro", "max", "team", "enterprise")
+_auth_cache = {"t": 0.0, "v": None}
+
+
+def auth_status(force=False):
+    """`claude auth status`: whether Claude Code is signed in, how, and with which plan. Cached for 30 s."""
+    if not force and _auth_cache["v"] is not None and time.time() - _auth_cache["t"] < 30:
+        return _auth_cache["v"]
+    exe = find_claude_cli()
+    v = {"logged_in": False, "method": "", "plan": "", "account": ""}
+    if exe:
+        try:
+            r = subprocess.run([exe, "auth", "status"], capture_output=True, text=True, encoding="utf-8",
+                               timeout=30, creationflags=NOWIN)
+            d = json.loads((r.stdout or "").strip() or "{}")
+            v = {"logged_in": bool(d.get("loggedIn")), "method": str(d.get("authMethod") or ""),
+                 "plan": str(d.get("subscriptionType") or d.get("planTier") or "").lower(),
+                 "account": str(d.get("email") or "")}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    _auth_cache.update(t=time.time(), v=v)
+    return v
+
+
+def subscription_ok(a):
+    return a["logged_in"] and a["plan"] in SUBSCRIPTION_PLANS
+
+
+def status(force=False):
     try:
         import anthropic  # noqa: F401
         sdk = True
     except ImportError:
         sdk = False
     cli = find_claude_cli()
+    a = auth_status(force) if cli else {"logged_in": False, "method": "", "plan": "", "account": ""}
+    authorized = bool(cli) and subscription_ok(a)
     return {
         "cli": bool(cli), "cli_path": cli or "", "sdk": sdk, "api_key": bool(_api_key()),
         "key_source": "environment" if os.environ.get("ANTHROPIC_API_KEY") else ("saved" if _api_key() else ""),
         "model": MODEL,
-        "preferred": "cli" if cli else ("api" if sdk and _api_key() else ""),
+        "signed_in": a["logged_in"], "plan": a["plan"], "account": a["account"], "auth_method": a["method"],
+        "authorized": authorized,
+        "preferred": "cli" if authorized else ("api" if sdk and _api_key() else ""),
+        "usage": _load_cfg().get("claude_usage"),
     }
+
+
+def _open_terminal(args, title):
+    """Run a command in a new, visible terminal window (sign-in may ask the user to paste a code)."""
+    if sys.platform == "win32":
+        line = subprocess.list2cmdline(args)
+        subprocess.Popen(["cmd.exe", "/c", "start", title, "cmd.exe", "/k", line], creationflags=NOWIN)
+        return
+    import shlex
+
+    line = " ".join(shlex.quote(a) for a in args)
+    if sys.platform == "darwin":
+        script = line.replace("\\", "\\\\").replace('"', '\\"')
+        subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{script}"',
+                          "-e", 'tell application "Terminal" to activate'])
+        return
+    for term in (["x-terminal-emulator", "-e"], ["gnome-terminal", "--"], ["konsole", "-e"], ["xfce4-terminal", "-x"],
+                 ["xterm", "-e"]):
+        if shutil.which(term[0]):
+            subprocess.Popen(term + ["sh", "-c", line + "; echo; read -p 'Press Enter to close' x"])
+            return
+    raise AssistantError(f"no terminal program found: run `{line}` in a terminal yourself")
+
+
+def login():
+    """Open the Claude sign-in (claude auth login) in a terminal window; the panel then polls status()."""
+    exe = find_claude_cli()
+    if not exe:
+        raise AssistantError("Claude Code is not installed. Install it first (see the panel), then sign in.")
+    _auth_cache["v"] = None
+    _open_terminal([exe, "auth", "login"], "Sign in to Claude")
+    return {"ok": True, "message": "A window opened for the Claude sign-in. Choose your Claude account (Pro or Max) "
+                                   "in the browser; this panel unlocks as soon as the sign-in is complete."}
+
+
+def logout():
+    exe = find_claude_cli()
+    if not exe:
+        raise AssistantError("Claude Code is not installed")
+    subprocess.run([exe, "auth", "logout"], capture_output=True, text=True, timeout=60, creationflags=NOWIN)
+    _auth_cache["v"] = None
+    cfg = _load_cfg()
+    cfg.pop("claude_usage", None)
+    _save_cfg(cfg)
+
+
+def _record_usage(info):
+    """Keep the plan's usage windows from a Claude Code rate_limit_event (utilization 0..1, reset as unix time)."""
+    wins = info.get("unifiedWindows") or {}
+    if not wins and info.get("rateLimitType"):
+        wins = {info["rateLimitType"]: {"utilization": info.get("utilization"), "resetsAt": info.get("resetsAt"),
+                                        "status": info.get("status")}}
+    out = {}
+    for k, w in wins.items():
+        if not isinstance(w, dict):
+            continue
+        u = w.get("utilization")
+        if isinstance(u, (int, float)):
+            u = u * 100 if u <= 1 else u
+        out[k] = {"percent": None if u is None else round(float(u), 1), "resets_at": w.get("resetsAt"),
+                  "status": w.get("status", "")}
+    if not out:
+        return None
+    rec = {"windows": out, "status": info.get("status", ""), "checked_at": time.time()}
+    cfg = _load_cfg()
+    cfg["claude_usage"] = rec
+    _save_cfg(cfg)
+    return rec
+
+
+def usage(refresh=False):
+    """The last known usage of the Claude plan. refresh=True asks Claude Code for the current figures with a
+    one-word request to the smallest model (which itself counts a tiny amount against the plan)."""
+    if refresh:
+        st = status(force=True)
+        if not st["authorized"]:
+            raise AssistantError("sign in with a Claude Pro or Max account first")
+        _ask_cli("Reply with the single word OK.", timeout=120, model="haiku", system="Reply with OK.")
+    return {"usage": _load_cfg().get("claude_usage"), "plan": auth_status()["plan"]}
 
 
 # ------------------------------------------------------------------ MCP registration (Claude Desktop / Claude Code)
@@ -227,27 +344,41 @@ class AssistantError(Exception):
     pass
 
 
-def _ask_cli(prompt, timeout=600):
+def _ask_cli(prompt, timeout=600, model=None, system=None):
     exe = find_claude_cli()
     if not exe:
-        raise AssistantError("Claude Code is not installed. Install it from https://claude.com/claude-code, run "
-                             "`claude` once in a terminal and sign in with your Claude Pro or Max account.")
-    cmd = [exe, "-p", "--output-format", "json", "--system-prompt", SYSTEM_PROMPT, "--tools", "",
-           "--no-session-persistence"]
+        raise AssistantError("Claude Code is not installed. Install it from https://claude.com/claude-code, then "
+                             "sign in with your Claude Pro or Max account.")
+    if not subscription_ok(auth_status()):
+        raise AssistantError("Claude is not authorized: sign in with a Claude Pro or Max account in the Claude panel.")
+    cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--system-prompt", system or SYSTEM_PROMPT,
+           "--tools", "", "--no-session-persistence"]
+    if model:
+        cmd += ["--model", model]
     try:
         r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                           creationflags=NOWIN)
     except subprocess.TimeoutExpired:
-        raise AssistantError("Claude did not answer within 10 minutes") from None
+        raise AssistantError(f"Claude did not answer within {timeout // 60} minutes") from None
     out = (r.stdout or "").strip()
-    try:
-        data = json.loads(out.splitlines()[-1]) if out else {}
-    except ValueError:
-        data = {}
+    data = {}
+    for line in out.splitlines():   # stream-json: one event per line; the last one is the result
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "rate_limit_event" and isinstance(ev.get("rate_limit_info"), dict):
+            try:
+                _record_usage(ev["rate_limit_info"])
+            except (OSError, ValueError, TypeError):
+                pass
+        elif ev.get("type") == "result":
+            data = ev
     if r.returncode != 0 or data.get("is_error"):
         msg = data.get("result") or (r.stderr or out or "").strip()[-800:]
         if "login" in msg.lower() or "auth" in msg.lower():
-            msg += "\nRun `claude` in a terminal and sign in (/login) with your Claude account, then try again."
+            _auth_cache["v"] = None
+            msg += "\nSign in again with your Claude account (Sign in with Claude in the Claude panel)."
         raise AssistantError("Claude Code: " + (msg or f"exit code {r.returncode}"))
     return data.get("result", out)
 
@@ -295,8 +426,11 @@ def ask(mode="generate", request="", script="", lang="mx3", error="", log="", ba
     st = status()
     use = backend if backend in ("cli", "api") else st["preferred"]
     if not use:
-        raise AssistantError("Claude is not set up. Either install Claude Code and sign in with your Claude Pro or "
-                             "Max account, or `pip install anthropic` and enter an API key.")
+        raise AssistantError("Claude is not authorized. Sign in with your Claude Pro or Max account in the Claude "
+                             "panel (or enter an Anthropic API key).")
+    if use == "cli" and not st["authorized"]:
+        raise AssistantError("Claude Code is not signed in with a Claude Pro or Max account.")
     text = _ask_cli(prompt) if use == "cli" else _ask_api(prompt)
     code, clang = extract_code(text)
-    return {"text": text, "code": code, "lang": clang, "backend": use}
+    return {"text": text, "code": code, "lang": clang, "backend": use,
+            "usage": _load_cfg().get("claude_usage") if use == "cli" else None}

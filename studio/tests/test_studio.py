@@ -158,6 +158,32 @@ class TestPlusExtras(unittest.TestCase):
 
 
 class TestAssistantHelpers(Isolated):
+    def test_usage_from_rate_limit_event(self):
+        rec = assistant._record_usage({"status": "allowed", "unifiedWindows": {
+            "five_hour": {"utilization": 0.13, "resetsAt": 1795727400, "status": "allowed"},
+            "seven_day": {"utilization": 0.38, "resetsAt": 1796119200, "status": "allowed"}}})
+        self.assertEqual(rec["windows"]["five_hour"]["percent"], 13.0)
+        self.assertEqual(rec["windows"]["seven_day"]["percent"], 38.0)
+        self.assertEqual(assistant._load_cfg()["claude_usage"]["windows"]["seven_day"]["resets_at"], 1796119200)
+
+    def test_locked_until_authorized(self):
+        saved = assistant.find_claude_cli, os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            assistant.find_claude_cli = lambda: None
+            st = assistant.status(force=True)
+            self.assertFalse(st["authorized"])
+            self.assertEqual(st["preferred"], "")
+            with self.assertRaises(assistant.AssistantError):
+                assistant.ask("generate", "a disk")
+            # signed in, but without a Pro / Max plan: still locked
+            self.assertFalse(assistant.subscription_ok({"logged_in": True, "plan": "free", "method": "", "account": ""}))
+            self.assertTrue(assistant.subscription_ok({"logged_in": True, "plan": "pro", "method": "", "account": ""}))
+        finally:
+            assistant.find_claude_cli = saved[0]
+            assistant._auth_cache["v"] = None
+            if saved[1] is not None:
+                os.environ["ANTHROPIC_API_KEY"] = saved[1]
+
     def test_extract_code(self):
         code, lang = assistant.extract_code("text\n```mx3\nRun(1e-9)\n```\nmore\n```python\nimport numpy\n```")
         self.assertEqual((code, lang), ("import numpy\n", "py"))
@@ -232,6 +258,129 @@ class TestMcp(Isolated):
     def test_paths_cannot_leave_workspace(self):
         r = self.call(7, "tools/call", {"name": "render_ovf", "arguments": {"path": "../../etc/passwd"}})
         self.assertTrue(r.get("result", {}).get("isError") or "error" in r)
+
+
+class TestOutputFolder(Isolated):
+    """The output folder can be changed, is remembered, and files in it can be deleted from the app."""
+
+    def _studio(self):
+        from mumaxstudio.server import Studio
+
+        return Studio(os.path.join(self.tmp, "ws"))
+
+    def _wait(self, st, timeout=60):
+        t0 = time.time()
+        while st.job.running and time.time() - t0 < timeout:
+            time.sleep(0.05)
+
+    def test_run_refused_until_a_folder_is_chosen(self):
+        from mumaxstudio.server import Studio, splash_html
+        from mumaxstudio import __version__
+
+        st = Studio(os.path.join(self.tmp, "ws"), folder_chosen=False)
+        r = st.api_run({}, {"name": "x", "script": "SetGridSize(4,4,1)\nSetCellSize(1e-9,1e-9,1e-9)\n"})
+        self.assertTrue(r.get("need_folder"))
+        self.assertIsNone(st.job)
+        self.assertFalse(st.api_outinfo({"name": ["x"]}, {})["chosen"])
+        self.assertTrue(st.api_workspace({}, {"path": os.path.join(self.tmp, "chosen")})["chosen"])
+        r = st.api_run({}, {"name": "x", "script": "SetGridSize(4,4,1)\nSetCellSize(1e-9,1e-9,1e-9)\n"})
+        self.assertTrue(r.get("ok"))
+        self._wait(st)
+        self.assertIn(__version__, splash_html())
+
+    def test_change_folder_and_run_there(self):
+        from mumaxstudio import server
+
+        st = self._studio()
+        other = os.path.join(self.tmp, "elsewhere", "sims")
+        r = st.api_workspace({}, {"path": other})
+        self.assertEqual(r["workspace"], os.path.abspath(other))
+        self.assertTrue(os.path.isdir(other))
+        self.assertEqual(server.saved_workspace(), os.path.abspath(other))     # remembered for the next start
+        info = st.api_outinfo({"name": ["my run"], "lang": ["py"]}, {})
+        self.assertEqual(info["out_dir"], os.path.join(os.path.abspath(other), "myrun.out"))
+        self.assertTrue(info["script"].endswith("myrun.py"))
+        res = st.api_run({}, {"name": "r1", "lang": "mx3", "device": "cpu",
+                              "script": "SetGridSize(4, 4, 1)\nSetCellSize(2e-9, 2e-9, 2e-9)\nMsat=800e3\nAex=13e-12\n"
+                                        "m=Uniform(1, 0, 0)\nSave(m)\n"})
+        self._wait(st)
+        self.assertEqual(res["out_dir"], os.path.join(os.path.abspath(other), "r1.out"))
+        self.assertTrue(os.path.isfile(os.path.join(other, "r1.mx3")))
+        self.assertTrue(os.path.isfile(os.path.join(other, "r1.out", "m000000.ovf")))
+        self.assertEqual(st.api_outinfo({"name": ["r1"]}, {})["replaced"], 1)
+        with self.assertRaises(ValueError):
+            st.api_workspace({}, {"path": "relative/path"})
+        with self.assertRaises(ValueError):
+            st.api_workspace({}, {"path": os.path.join(other, "r1.mx3")})
+
+    def test_save_script_anywhere(self):
+        st = self._studio()
+        target = os.path.join(self.tmp, "scripts", "a.mx3")
+        self.assertTrue(st.api_save_script({}, {"path": target, "text": "Run(1e-9)\n"})["ok"])
+        self.assertTrue(st.api_save_script({}, {"path": target, "text": "x"})["exists"])   # asks before replacing
+        st.api_save_script({}, {"path": target, "text": "y", "overwrite": True})
+        with open(target, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "y")
+        st.api_save_script({}, {"path": "rel.py", "text": "pass"})
+        self.assertTrue(os.path.isfile(os.path.join(st.workspace, "rel.py")))
+        with self.assertRaises(PermissionError):
+            st.api_save_script({}, {"path": os.path.join(self.tmp, "x.exe"), "text": ""})
+
+    def test_delete_files_and_folders(self):
+        st = self._studio()
+        os.makedirs(os.path.join(st.workspace, "a.out", "sub"))
+        for rel in ("a.out/m000000.ovf", "a.out/sub/x.txt", "b.mx3", "c.png"):
+            with open(os.path.join(st.workspace, *rel.split("/")), "w") as f:
+                f.write("1")
+        listing = st.api_files({}, {})
+        self.assertIn("a.out", listing["dirs"])
+        self.assertIn("a.out/sub", listing["dirs"])
+        r = st.api_delete({}, {"paths": ["b.mx3", "a.out/m000000.ovf", "missing.txt"]})
+        self.assertEqual(r["deleted"], ["b.mx3", "a.out/m000000.ovf"])
+        st.api_delete({}, {"path": "a.out"})
+        self.assertFalse(os.path.exists(os.path.join(st.workspace, "a.out")))
+        for bad in ("", ".", "../outside.txt"):
+            with self.assertRaises(PermissionError):
+                st.api_delete({}, {"path": bad})
+        self.assertTrue(os.path.isfile(os.path.join(st.workspace, "c.png")))
+
+    def test_running_output_is_protected(self):
+        st = self._studio()
+        st.api_run({}, {"name": "busy", "lang": "mx3", "device": "cpu",
+                        "script": "SetGridSize(8, 8, 1)\nSetCellSize(2e-9, 2e-9, 2e-9)\nMsat=800e3\nAex=13e-12\n"
+                                  "alpha=0.5\nm=Uniform(1, 1, 0)\nTableAutoSave(1e-13)\nRun(1e-6)\n"})
+        try:
+            t0 = time.time()
+            while not os.path.isdir(st.job.out_dir) and time.time() - t0 < 20:
+                time.sleep(0.05)
+            with self.assertRaisesRegex(PermissionError, "running"):
+                st.api_delete({}, {"path": "busy.out"})
+            self.assertEqual(st.api_files({}, {})["running"], "busy.out")
+        finally:
+            st.job.control.request_stop()
+            self._wait(st)
+        self.assertTrue(st.api_delete({}, {"path": "busy.out"})["ok"])
+
+    def test_defregion_accepts_python_function(self):
+        sim = Simulation(backend="cpu", precision="single", out_dir=None, log=lambda *a: None)
+        run_source(sim, "SetGridSize(8, 4, 2)\nSetCellSize(1e-9, 1e-9, 1e-9)\n"
+                        "DefRegion(3, lambda x, y, z: x > 0)\n", filename="t.py", lang="py", out=lambda *a: None)
+        self.assertTrue(np.all(sim.regions[:, :, 4:] == 3))
+        self.assertTrue(np.all(sim.regions[:, :, :4] == 0))
+
+    def test_geometry_3d_preview(self):
+        st = self._studio()
+        b = st.api_preview_geom3d({}, {"n": [16, 8, 4], "cell": [2e-9, 2e-9, 2e-9], "lang": "mx3",
+                                       "code": "SetGeom(Cylinder(16e-9, 8e-9))\nDefRegion(2, XRange(0, inf))"})
+        hl = struct.unpack("<I", b[:4])[0]
+        hdr = json.loads(b[4:4 + hl])
+        self.assertEqual((hdr["nx"], hdr["ny"], hdr["nz"], hdr["ncomp"]), (16, 8, 4, 1))
+        data = np.frombuffer(b[4 + hl:4 + hl + 4 * 16 * 8 * 4], dtype=np.float32).reshape(4, 8, 16)
+        geom = np.frombuffer(b[4 + hl + 4 * 16 * 8 * 4:], dtype=np.uint8).reshape(4, 8, 16)
+        self.assertGreater(hdr["cells"], 0)
+        self.assertLess(hdr["cells"], 16 * 8 * 4)
+        self.assertEqual(set(np.unique(data[geom == 1])), {1.0, 3.0})    # region + 1 inside the magnet
+        self.assertTrue(np.all(data[geom == 0] == 0))
 
 
 class TestHeadlessRun(Isolated):

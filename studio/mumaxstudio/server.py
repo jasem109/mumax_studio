@@ -174,9 +174,9 @@ class Job:
                 self.append_log("ERROR: " + self.error)
                 self.append_log(traceback.format_exc()[-3000:])
             finally:
-                f = self.sim._table_file
-                if f:
-                    f.flush()
+                # close table.txt so the output can be deleted or moved (Windows keeps open files locked);
+                # a later Run from the console reopens it for appending
+                self.sim.close()
                 self.sim.notify(force=True)
 
         if self.ns is None:
@@ -237,8 +237,10 @@ class Job:
 
 
 class Studio:
-    def __init__(self, workspace, backend=None, precision="single", script=None):
+    def __init__(self, workspace, backend=None, precision="single", script=None, folder_chosen=True):
         self.workspace = os.path.abspath(workspace)
+        # False until the user has picked an output folder (in this session or before): runs are refused until then
+        self.folder_chosen = folder_chosen
         os.makedirs(self.workspace, exist_ok=True)
         self.backend = backend
         self.precision = precision
@@ -256,7 +258,8 @@ class Studio:
         self.native = False   # True inside the desktop window (pywebview): downloads go through a save dialog
 
     # ---------------------------------------------------------------- settings (device, precision, ...)
-    SETTINGS_KEYS = ("device", "precision", "theme", "layout", "assistant_backend", "update_skip")
+    SETTINGS_KEYS = ("device", "precision", "theme", "layout", "assistant_backend", "update_skip", "confirm_run",
+                     "geo_view")
 
     def settings(self):
         from .assistant import _load_cfg
@@ -277,6 +280,80 @@ class Studio:
                 st[k] = v
         _save_cfg(cfg)
         return {"ok": True, "settings": self.settings()}
+
+    # ---------------------------------------------------------------- output folder (the "workspace")
+    def _remember_workspace(self):
+        from .assistant import _load_cfg, _save_cfg
+
+        cfg = _load_cfg()
+        st = cfg.setdefault("studio", {})
+        st["workspace"] = self.workspace
+        recent = [self.workspace] + [r for r in st.get("recent_workspaces", []) if r != self.workspace]
+        st["recent_workspaces"] = recent[:8]
+        _save_cfg(cfg)
+
+    def _recent_workspaces(self):
+        from .assistant import _load_cfg
+
+        rec = _load_cfg().get("studio", {}).get("recent_workspaces", [])
+        return [r for r in rec if isinstance(r, str) and os.path.isdir(r)]
+
+    def api_workspace(self, q, body):
+        """GET: the current output folder and recent ones. POST {path}: switch to another folder (created if
+        needed). Every later run writes <folder>/<name>.out/ and a copy of its script there."""
+        if body.get("path") is not None:
+            raw = os.path.expandvars(os.path.expanduser(str(body["path"]).strip().strip('"')))
+            if not raw or not os.path.isabs(raw):
+                raise ValueError("give a full folder path, e.g. D:\\simulations or /home/me/sims")
+            p = os.path.abspath(raw)
+            if os.path.isfile(p):
+                raise ValueError(f"{p} is a file, not a folder")
+            os.makedirs(p, exist_ok=True)
+            probe = os.path.join(p, f".mumaxstudio-write-test-{secrets.token_hex(4)}")
+            try:
+                with open(probe, "w") as f:
+                    f.write("ok")
+                os.remove(probe)
+            except OSError as e:
+                raise PermissionError(f"cannot write to {p}: {e.strerror or e}") from None
+            self.workspace = p
+            self.folder_chosen = True
+            self._remember_workspace()
+        return {"workspace": self.workspace, "recent": self._recent_workspaces(), "sep": os.sep,
+                "default": default_workspace(), "chosen": self.folder_chosen}
+
+    @staticmethod
+    def _clean_name(name):
+        return "".join(c for c in (name or "untitled") if c.isalnum() or c in "-_") or "untitled"
+
+    def api_outinfo(self, q, body):
+        """Where a run called `name` will write: shown in the top bar and before every run."""
+        name = self._clean_name(q.get("name", ["untitled"])[0])
+        lang = q.get("lang", ["mx3"])[0]
+        out = os.path.join(self.workspace, name + ".out")
+        n = 0
+        if os.path.isdir(out):
+            n = sum(1 for f in os.listdir(out) if f.lower().endswith(OUTPUT_EXT))
+        return {"workspace": self.workspace, "chosen": self.folder_chosen, "name": name, "out_dir": out,
+                "exists": os.path.isdir(out),
+                "replaced": n, "script": os.path.join(self.workspace, name + (".py" if lang == "py" else ".mx3"))}
+
+    def api_save_script(self, q, body):
+        """Write the editor text to a path the user chose (absolute, or relative to the output folder)."""
+        raw = os.path.expandvars(os.path.expanduser(str(body.get("path", "")).strip().strip('"')))
+        if not raw:
+            raise ValueError("no file name given")
+        p = os.path.abspath(raw if os.path.isabs(raw) else os.path.join(self.workspace, raw))
+        if not p.lower().endswith((".mx3", ".py", ".txt")):
+            raise PermissionError("scripts are saved as .mx3, .py or .txt")
+        if os.path.isdir(p):
+            raise ValueError(f"{p} is a folder")
+        if os.path.exists(p) and not body.get("overwrite"):
+            return {"exists": True, "path": p}
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(str(body.get("text", "")))
+        return {"ok": True, "path": p}
 
     def _resolve_device(self, dev):
         """Menu id ('auto', 'cpu', 'gpu:N') -> Backend kind, refusing devices that failed their self-test."""
@@ -301,7 +378,32 @@ class Studio:
     def api_assistant_status(self, q, body):
         from . import assistant
 
-        return assistant.status()
+        return assistant.status(force=q.get("force", ["0"])[0] == "1")
+
+    def api_assistant_login(self, q, body):
+        from . import assistant
+
+        try:
+            return assistant.login()
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
+
+    def api_assistant_logout(self, q, body):
+        from . import assistant
+
+        try:
+            assistant.logout()
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
+        return assistant.status(force=True)
+
+    def api_assistant_usage(self, q, body):
+        from . import assistant
+
+        try:
+            return assistant.usage(refresh=q.get("refresh", ["0"])[0] == "1")
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
 
     def api_assistant_key(self, q, body):
         from . import assistant
@@ -373,7 +475,8 @@ class Studio:
     # ---------------------------------------------------------------- API handlers
     def api_info(self, q, body):
         return {
-            "version": __version__, "python": sys.version.split()[0], "workspace": self.workspace,
+            "version": __version__, "python": sys.version.split()[0], "workspace": self.workspace, "sep": os.sep,
+            "folder_chosen": self.folder_chosen,
             "gpu": self.gpu, "cpu": self.cpu_name, "default_backend": self.backend or "auto",
             "examples": list_examples(),
             "initial_script": self.initial_script,
@@ -389,14 +492,18 @@ class Studio:
             return {"name": name, "text": f.read()}
 
     def api_run(self, q, body):
+        if not self.folder_chosen:
+            return {"error": "Choose where the results are saved first (the output folder).", "need_folder": True}
         if self.job and self.job.running:
             self.job.control.request_stop()
             self.job.thread.join(timeout=10)
-        name = "".join(c for c in (body.get("name") or "untitled") if c.isalnum() or c in "-_") or "untitled"
+        name = self._clean_name(body.get("name"))
         lang = body.get("lang", "mx3")
         text = body.get("script", "")
+        os.makedirs(self.workspace, exist_ok=True)
         # keep a copy of the script next to its output
-        with open(os.path.join(self.workspace, name + (".py" if lang == "py" else ".mx3")), "w", encoding="utf-8") as f:
+        script_path = os.path.join(self.workspace, name + (".py" if lang == "py" else ".mx3"))
+        with open(script_path, "w", encoding="utf-8") as f:
             f.write(text)
         backend = self._resolve_device(body.get("device") or body.get("backend"))
         precision = body.get("precision") or self.precision
@@ -405,8 +512,9 @@ class Studio:
         self.job = Job(self, name, text, lang, backend, precision)
         self.job.append_log(f"// backend: {self.job.sim.be.device_name} ({self.job.sim.be.precision} precision)")
         self.job.append_log(f"// output directory: {self.job.out_dir}")
+        self.job.append_log(f"// script saved as: {script_path}")
         self.job.start()
-        return {"ok": True}
+        return {"ok": True, "out_dir": self.job.out_dir, "script": script_path}
 
     def _need_job(self):
         if self.job is None:
@@ -538,20 +646,48 @@ class Studio:
         hb += b" " * ((-(4 + len(hb))) % 4)
         return b"".join([struct.pack("<I", len(hb)), hb, data.tobytes(), geom.tobytes()])
 
+    MAX_LISTED = 3000
+
     def api_files(self, q, body):
-        out = []
-        for root, dirs, files in os.walk(self.workspace):
+        """Files under the output folder, at most three folder levels deep: the folder can be anything the user
+        picked, a whole drive even, so the walk is bounded."""
+        out, dirs, truncated = [], [], False
+        top = self.workspace.rstrip(os.sep)
+        for root, dnames, files in os.walk(self.workspace):
+            dnames[:] = sorted(d for d in dnames if not d.startswith(".") and d != "__pycache__")
+            rel_root = os.path.relpath(root, self.workspace)
+            depth = 0 if root.rstrip(os.sep) == top else rel_root.count(os.sep) + 1
+            if depth >= 3:
+                dnames[:] = []
+            if depth:
+                dirs.append(rel_root.replace("\\", "/"))
             for f in sorted(files):
+                if f.startswith("."):
+                    continue
                 p = os.path.join(root, f)
-                rel = os.path.relpath(p, self.workspace).replace("\\", "/")
-                out.append({"path": rel, "size": os.path.getsize(p), "mtime": os.path.getmtime(p)})
+                try:
+                    out.append({"path": os.path.relpath(p, self.workspace).replace("\\", "/"),
+                                "size": os.path.getsize(p), "mtime": os.path.getmtime(p)})
+                except OSError:
+                    continue
+            if len(out) >= self.MAX_LISTED:
+                truncated = True
+                break
         out.sort(key=lambda e: e["path"])
-        return {"workspace": self.workspace, "files": out[:2000]}
+        running = None
+        if self.job is not None and self.job.running:
+            running = os.path.relpath(self.job.out_dir, self.workspace).replace("\\", "/")
+        return {"workspace": self.workspace, "files": out[:self.MAX_LISTED], "dirs": sorted(dirs),
+                "truncated": truncated, "running": running}
 
     def _safe_path(self, rel):
         p = os.path.abspath(os.path.join(self.workspace, rel))
-        if os.path.commonpath([p, self.workspace]) != self.workspace:
-            raise PermissionError("path outside workspace")
+        try:
+            inside = os.path.commonpath([p, self.workspace]) == self.workspace
+        except ValueError:   # another drive
+            inside = False
+        if not inside:
+            raise PermissionError("path outside the output folder")
         return p
 
     def api_file(self, q, body):
@@ -561,12 +697,41 @@ class Studio:
         return ("file", p)
 
     def api_delete(self, q, body):
-        p = self._safe_path(body.get("path", ""))
-        if os.path.isdir(p):
-            shutil.rmtree(p)
-        elif os.path.isfile(p):
-            os.remove(p)
-        return {"ok": True}
+        """Delete files or folders inside the output folder: body {path} or {paths: [...]}. The output folder
+        itself, and the output of a simulation that is still running, cannot be deleted."""
+        paths = body.get("paths")
+        if paths is None:
+            paths = [body.get("path", "")]
+        if not isinstance(paths, list) or not paths:
+            raise ValueError("nothing to delete")
+        targets = []
+        for rel in paths:
+            rel = str(rel or "").strip()
+            p = self._safe_path(rel) if rel else self.workspace
+            if p == self.workspace:
+                raise PermissionError("the output folder itself cannot be deleted from here")
+            if self.job is not None and self.job.running:
+                od = os.path.abspath(self.job.out_dir)
+                try:
+                    clash = os.path.commonpath([p, od]) in (p, od)
+                except ValueError:   # different drives
+                    clash = False
+                if clash:
+                    raise PermissionError(f"{rel} holds the output of the running simulation; stop it first")
+            targets.append((rel, p))
+        deleted, errors = [], []
+        for rel, p in targets:
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                elif os.path.isfile(p):
+                    os.remove(p)
+                else:
+                    continue
+                deleted.append(rel)
+            except OSError as e:
+                errors.append(f"{rel}: {e.strerror or e}")
+        return {"ok": not errors, "deleted": deleted, "errors": errors}
 
     def api_ovf_preview(self, q, body):
         """Render a saved OVF file as a field slice (same binary format as api_field)."""
@@ -587,6 +752,11 @@ class Studio:
         hb += b" " * ((-(4 + len(hb))) % 4)
         return b"".join([struct.pack("<I", len(hb)), hb, np.ascontiguousarray(sl).tobytes(),
                          np.ascontiguousarray(geom, dtype=np.uint8).tobytes()])
+
+    def api_preview_geom3d(self, q, body):
+        """The whole geometry box for the 3D viewer: one component (region number + 1 inside the magnet),
+        same binary layout as api_field3d."""
+        return self.api_preview_geom(q, dict(body, full=True))
 
     def api_preview_geom(self, q, body):
         """Rasterise geometry + regions code on a mesh without running anything (Geometry builder preview).
@@ -626,6 +796,21 @@ class Studio:
         th.join(timeout=30)
         if th.is_alive():
             raise TimeoutError("geometry code took longer than 30 s")
+        if body.get("full"):
+            geom3 = np.asarray(sim.geom, dtype=bool)
+            nz, ny, nx = geom3.shape
+            s = 1
+            while (-(-nx // s)) * (-(-ny // s)) * nz > 400_000 and s < max(nx, ny):
+                s += 1
+            g = geom3[:, ::s, ::s]
+            reg = (np.asarray(sim.regions)[:, ::s, ::s].astype(np.float32) + 1.0) * g
+            hdr = {"name": "geometry", "unit": "", "ncomp": 1, "nx": int(g.shape[2]), "ny": int(g.shape[1]),
+                   "nz": int(nz), "stride": [s, s, 1], "n": n, "cell": [cell[0] * s, cell[1] * s, cell[2]], "t": 0,
+                   "cells": int(geom3.sum()), "total": int(sim.mesh.ncell), "error": res.get("error")}
+            hb = json.dumps(hdr).encode()
+            hb += b" " * ((-(4 + len(hb))) % 4)
+            return b"".join([struct.pack("<I", len(hb)), hb, np.ascontiguousarray(reg[None]).tobytes(),
+                             np.ascontiguousarray(g, dtype=np.uint8).tobytes()])
         layer = max(0, min(layer, sim.mesh.n[2] - 1))
         vol = sim.vol_host()[layer].astype(np.float32)
         reg = sim.regions[layer].astype(np.float32)
@@ -666,9 +851,14 @@ class Studio:
         ("GET", "/api/field3d"): "api_field3d", ("POST", "/api/settings"): "api_settings", ("GET", "/api/assistant"): "api_assistant_status",
         ("POST", "/api/assistant/key"): "api_assistant_key", ("POST", "/api/assist"): "api_assist",
         ("POST", "/api/assistant/connect"): "api_assistant_connect",
+        ("POST", "/api/assistant/login"): "api_assistant_login", ("POST", "/api/assistant/logout"): "api_assistant_logout",
+        ("GET", "/api/assistant/usage"): "api_assistant_usage",
         ("GET", "/api/update"): "api_update", ("POST", "/api/update/start"): "api_update_start",
         ("GET", "/api/update/progress"): "api_update_progress", ("POST", "/api/update/apply"): "api_update_apply",
         ("POST", "/api/update/open"): "api_update_open",
+        ("GET", "/api/workspace"): "api_workspace", ("POST", "/api/workspace"): "api_workspace",
+        ("GET", "/api/outinfo"): "api_outinfo", ("POST", "/api/save_script"): "api_save_script",
+        ("POST", "/api/preview_geom3d"): "api_preview_geom3d",
     }
 
 
@@ -775,18 +965,33 @@ class NativeBridge:
 
     def __init__(self, studio):
         self._studio = studio
-        self.window = None
+        self._window = None   # private: pywebview exposes (and walks) every public attribute
 
     def _ask_path(self, name):
         import webview
 
         ext = os.path.splitext(name)[1].lstrip(".") or "*"
         types = (f"{ext.upper()} file (*.{ext})", "All files (*.*)") if ext != "*" else ("All files (*.*)",)
-        res = self.window.create_file_dialog(webview.SAVE_DIALOG, directory=os.path.expanduser("~"),
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, directory=self._studio.workspace,
                                              save_filename=name, file_types=types)
         if not res:
             return None
         return res if isinstance(res, str) else res[0]
+
+    def choose_folder(self, start=""):
+        """Folder picker for the output folder; returns "" when cancelled."""
+        import webview
+
+        start = str(start or "")
+        res = self._window.create_file_dialog(webview.FOLDER_DIALOG,
+                                             directory=start if os.path.isdir(start) else self._studio.workspace)
+        if not res:
+            return ""
+        return res if isinstance(res, str) else res[0]
+
+    def choose_save_path(self, name):
+        """Save dialog that only returns the chosen path; the page then writes it through /api/save_script."""
+        return self._ask_path(os.path.basename(str(name))) or ""
 
     def save_text(self, name, text):
         p = self._ask_path(os.path.basename(str(name)))
@@ -828,10 +1033,107 @@ class NativeBridge:
         return p
 
 
+def default_workspace():
+    return os.path.join(os.path.expanduser("~"), "mumax-studio")
+
+
+def saved_workspace():
+    """The output folder chosen in the app last time, if it still exists."""
+    try:
+        from .assistant import _load_cfg
+
+        p = _load_cfg().get("studio", {}).get("workspace")
+        return p if isinstance(p, str) and os.path.isdir(p) else None
+    except Exception:  # unreadable config: use the default
+        return None
+
+
+def splash_html():
+    """Shown in the desktop window while the engine starts (devices are probed, the server binds)."""
+    try:
+        with open(os.path.join(WEB, "icon.svg"), encoding="utf-8") as f:
+            icon = f.read()
+    except OSError:
+        icon = ""
+    return SPLASH.replace("{icon}", icon).replace("{version}", __version__)
+
+
+SPLASH = """<!doctype html><html><head><meta charset="utf-8"><title>mumax Studio</title><style>
+html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#ebe8e1;color:#1c1b18}
+@media (prefers-color-scheme:dark){html,body{background:#121211;color:#f2f0ea}}
+.c{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+.c svg{width:104px;height:104px}.n{font-size:30px;font-weight:600;letter-spacing:.2px}
+.v{font-size:14px;opacity:.65}.s{margin-top:22px;font-size:12.5px;opacity:.6}
+.bar{width:180px;height:3px;border-radius:2px;background:rgba(127,127,127,.25);overflow:hidden}
+.bar i{display:block;width:40%;height:100%;background:#b5441c;border-radius:2px;animation:m 1.1s ease-in-out infinite}
+@keyframes m{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+</style></head><body><div class="c">{icon}<div class="n">mumax Studio</div><div class="v">version {version}</div>
+<div class="s">starting the simulation engine…</div><div class="bar"><i></i></div></div></body></html>"""
+
+
 def serve(host="127.0.0.1", port=35367, script=None, backend=None, precision="single", open_browser=True,
           native=False, workspace=None):
-    workspace = workspace or os.path.join(os.path.expanduser("~"), "mumax-studio")
-    studio = Studio(workspace, backend, precision, script)
+    if native:
+        try:
+            import webview  # pywebview: Edge WebView2 on Windows, WebKit on macOS, GTK/Qt on Linux
+        except Exception as e:  # not installed
+            print(f"native window unavailable ({e}); opening the browser instead")
+            native = False
+    if native:
+        # open the window at once with the splash; build the engine and the server behind it, then load the app
+        webview.settings["ALLOW_DOWNLOADS"] = True
+        bridge = NativeBridge(None)
+        win = webview.create_window("mumax Studio", html=splash_html(), width=1500, height=950,
+                                    min_size=(900, 600), js_api=bridge)
+        bridge._window = win
+        box = {}
+
+        def boot():
+            win.events.loaded.wait(10)   # let the splash finish loading before the app replaces it
+            try:
+                studio, httpd, url = _start(host, port, script, backend, precision, workspace)
+            except BaseException as e:  # shown in the window rather than lost
+                import html
+
+                win.load_html(f"<body style='font-family:sans-serif;padding:30px'><h3>mumax Studio could not "
+                              f"start</h3><pre>{html.escape(str(e))}</pre></body>")
+                return
+            studio.native = True
+            bridge._studio = studio
+            box.update(studio=studio, httpd=httpd)
+            win.load_url(url)
+
+        try:
+            webview.start(boot)  # blocks until the window is closed
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if box:
+                _stop(box["studio"], box["httpd"])
+        return
+    studio, httpd, url = _start(host, port, script, backend, precision, workspace)
+    if open_browser:
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("bye")
+    finally:
+        _stop(studio, httpd)
+
+
+def _stop(studio, httpd):
+    if studio.job:
+        studio.job.control.request_stop()
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def _start(host, port, script, backend, precision, workspace):
+    chosen = bool(workspace) or saved_workspace() is not None
+    workspace = workspace or saved_workspace() or default_workspace()
+    studio = Studio(workspace, backend, precision, script, folder_chosen=chosen)
     httpd = None
     for p in range(port, port + 20):
         try:
@@ -856,34 +1158,8 @@ def serve(host="127.0.0.1", port=35367, script=None, backend=None, precision="si
     print(f"mumax-studio {__version__}")
     print(f"  CPU : {studio.cpu_name}")
     print(f"  GPU : {studio.gpu['info'] if not studio.gpu['available'] else 'available - ' + studio.gpu['info']}")
-    print(f"  workspace: {workspace}")
+    print(f"  output folder: {workspace}" + ("" if chosen else " (not chosen yet: the app asks before the first run)"))
     print(f"  open {url}")
     print("  press Ctrl+C to quit")
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    try:
-        if native:
-            try:
-                import webview  # pywebview: Edge WebView2 on Windows, WebKit on macOS, GTK/Qt on Linux
-
-                webview.settings["ALLOW_DOWNLOADS"] = True
-                studio.native = True
-                bridge = NativeBridge(studio)
-                win = webview.create_window("mumax Studio", url, width=1500, height=950, min_size=(900, 600),
-                                            js_api=bridge)
-                bridge.window = win
-                webview.start()  # blocks until the window is closed
-                return
-            except Exception as e:  # not installed, or no GUI toolkit on this system
-                print(f"native window unavailable ({e}); opening the browser instead")
-        if open_browser:
-            threading.Timer(0.5, lambda: webbrowser.open(url)).start()
-        while t.is_alive():
-            t.join(0.5)
-    except KeyboardInterrupt:
-        print("bye")
-    finally:
-        if studio.job:
-            studio.job.control.request_stop()
-        httpd.shutdown()
-        httpd.server_close()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return studio, httpd, url

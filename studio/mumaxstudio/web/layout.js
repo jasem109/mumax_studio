@@ -9,12 +9,11 @@ const LAYOUT = (() => {
     standard: { dir: "row", sizes: [0.58, 0.42], kids: [
       { dir: "col", sizes: [0.7, 0.3], kids: ["view", "console"] },
       { dir: "col", sizes: [0.5, 0.5], kids: ["plot", "assistant"] }] },
-    viewer: { dir: "row", sizes: [0.5, 0.5], kids: [
-      { dir: "col", sizes: [0.72, 0.28], kids: ["view", "console"] },
-      { dir: "col", sizes: [0.6, 0.4], kids: ["view3d", "plot"] }] },
+    viewer: { dir: "row", sizes: [0.7, 0.3], kids: ["view",
+      { dir: "col", sizes: [0.55, 0.45], kids: ["plot", "console"] }] },
     analysis: { dir: "col", sizes: [0.6, 0.4], kids: [
-      { dir: "row", sizes: [0.5, 0.5], kids: ["view3d", "view"] },
-      { dir: "row", sizes: [0.6, 0.4], kids: ["plot", "console"] }] },
+      { dir: "row", sizes: [0.55, 0.45], kids: ["view", "plot"] },
+      { dir: "row", sizes: [0.6, 0.4], kids: ["console", "assistant"] }] },
     assistant: { dir: "row", sizes: [0.36, 0.64], kids: ["assistant",
       { dir: "col", sizes: [0.62, 0.38], kids: ["view", { dir: "row", sizes: [0.5, 0.5], kids: ["plot", "console"] }] }] },
   };

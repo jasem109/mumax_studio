@@ -26,7 +26,24 @@ import time
 import traceback
 
 PROTOCOL = "2025-06-18"
-WORKSPACE = os.environ.get("MUMAXSTUDIO_WORKSPACE") or os.path.join(os.path.expanduser("~"), "mumax-studio")
+
+
+def _default_workspace():
+    """MUMAXSTUDIO_WORKSPACE, else the output folder last chosen in the app, else ~/mumax-studio."""
+    if os.environ.get("MUMAXSTUDIO_WORKSPACE"):
+        return os.environ["MUMAXSTUDIO_WORKSPACE"]
+    try:
+        from .assistant import _load_cfg
+
+        p = _load_cfg().get("studio", {}).get("workspace")
+        if isinstance(p, str) and os.path.isdir(p):
+            return p
+    except Exception:  # unreadable config
+        pass
+    return os.path.join(os.path.expanduser("~"), "mumax-studio")
+
+
+WORKSPACE = _default_workspace()
 
 TOOLS = [
     {

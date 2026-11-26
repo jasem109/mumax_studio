@@ -314,10 +314,13 @@ const GEOM = (() => {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(() => fetchPreview(layer), 220);
   }
-  async function fetchPreview(layer) {
+  function previewBody(layer) {
     const M = mesh();
     const lang = needsPython() ? "py" : "mx3";
-    const body = { n: M.n, cell: M.cell.map((c) => c * 1e-9), code: code(lang).join("\n"), lang, layer, edgesmooth: M.smooth };
+    return { n: M.n, cell: M.cell.map((c) => c * 1e-9), code: code(lang).join("\n"), lang, layer, edgesmooth: M.smooth };
+  }
+  async function fetchPreview(layer) {
+    const body = previewBody(layer);
     const key = JSON.stringify(body);
     if (key === previewKey && preview) { STUDIO.redraw(); return; }
     const seq = ++previewSeq;
@@ -516,6 +519,6 @@ const GEOM = (() => {
 
   function exprById(id, lang) { const s = shapes.find((q) => q.id === id); return s ? shapeExpr(s, lang) : null; }
 
-  return { init, code, needsPython, exprById, mesh, draw, attach, requestPreview, save, load, reset, regionsUsed,
+  return { init, code, needsPython, exprById, mesh, draw, attach, requestPreview, previewBody, save, load, reset, regionsUsed,
     get shapes() { return shapes; }, get selected() { return shapes[sel]; } };
 })();

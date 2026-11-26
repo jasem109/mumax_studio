@@ -144,14 +144,24 @@ jobs:
         with: { path: out, merge-multiple: true }
       - name: Checksums
         run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: actions/checkout@v4
+        with: { path: src, sparse-checkout: studio/CHANGES.md, sparse-checkout-cone-mode: false }
+      - name: Release notes (this version's section of studio/CHANGES.md, then the install notes)
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '/^## /{p=($2==v); if(p){print "## What is new in " v; next}} p' src/studio/CHANGES.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ## Install
+          - **Windows:** run `mumax-studio-windows-setup.exe` (or unzip the portable build).
+          - **Linux:** unpack the `.tar.gz` and run `./install-linux.sh`, or start `mumax-studio/mumax-studio` directly.
+          - **macOS (Apple silicon):** unzip and open `mumax-studio.app` (right-click → Open the first time; the app is not notarised).
+          - The `-nvidia` builds include CuPy and the CUDA 12 runtime for NVIDIA GPUs; they need only a recent NVIDIA driver (525 or newer). All builds also run on the CPU.
+          - `SHA256SUMS.txt` lists the checksum of every file. On Windows: `Get-FileHash .\mumax-studio-windows-setup.exe`.
+          - If Windows SmartScreen says "Windows protected your PC", choose **More info → Run anyway** (shown while a new release has not yet built up download reputation). Python users can avoid installers entirely: `pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"`.
+          EOF
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
           generate_release_notes: true
-          body: |
-            **Windows:** run `mumax-studio-windows-setup.exe` (or unzip the portable build).
-            **Linux:** unpack the `.tar.gz` and run `./install-linux.sh`, or start `mumax-studio/mumax-studio` directly.
-            **macOS (Apple silicon):** unzip and open `mumax-studio.app` (right-click → Open the first time; the app is not notarised).
-            The `-nvidia` builds include CuPy and the CUDA 12 runtime for NVIDIA GPUs; they need only a recent NVIDIA driver (525 or newer). All builds also run on the CPU.
-            `SHA256SUMS.txt` lists the checksum of every file. On Windows: `Get-FileHash .\mumax-studio-windows-setup.exe`.
-            If Windows SmartScreen says "Windows protected your PC", choose **More info → Run anyway** (shown while a new release has not yet built up download reputation). Python users can avoid installers entirely: `pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"`.
+          body_path: notes.md

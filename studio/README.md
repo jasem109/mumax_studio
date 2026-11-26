@@ -20,7 +20,8 @@ repository and rewritten in Python.
 * **3D viewer for OVF files**, in the spirit of mumax-view: arrows, cones or cells, slicing, orbiting, time series,
   OVF 1/2 from the workspace or dragged in from anywhere.
 * **Dockable panels**: resize, minimise, maximise, close, drag next to each other; the layout is remembered.
-* **Claude assistant**: with a Claude Pro/Max subscription (via Claude Code) or an API key, describe a simulation
+* **Claude assistant** (unlocked by signing in with a Claude Pro/Max account; a *Usage* button shows the plan's
+  5-hour and weekly usage in percent; an API key also works): describe a simulation
   and get a script, or have one fixed, explained or reviewed. A built-in MCP server lets Claude Desktop / Claude
   Code run simulations themselves.
 
@@ -104,7 +105,8 @@ python -m mumaxstudio mcp                      # MCP server (stdin/stdout) for C
 
 GUI options:
 * `--port 35367`
-* `--workspace DIR`: where scripts and outputs go. The default is `~/mumax-studio`.
+* `--workspace DIR`: where scripts and outputs go, overriding the output folder chosen in the app. Without it the
+  app asks for a folder before the first run and remembers it (the top bar shows it; change it any time).
 * `--native`: opens a desktop window instead of a browser tab. Requires `pip install pywebview`.
 * `--host 0.0.0.0`: serves the GUI to other machines, for example to use a remote GPU server from your laptop.
   Keep the printed token secret, because it grants code execution on that machine.
@@ -118,7 +120,7 @@ iscc packaging/installer.iss     # Windows installer, needs Inno Setup 6
 ```
 
 PyInstaller builds for the OS it runs on. The workflow in `.github/workflows/release.yml` builds the Windows, Linux
-and macOS packages on GitHub's machines. Push a tag (`git tag v0.3.0 && git push origin v0.3.0`) and the installers
+and macOS packages on GitHub's machines. Push a tag (`git tag v0.4.0 && git push origin v0.4.0`) and the installers
 are attached to a new release a few minutes later.
 
 ## Using the GUI
@@ -133,7 +135,7 @@ The left rail switches the side panel; the viewer, plot and console stay visible
 | **Script** | The generated script. It follows the forms until you edit it by hand. Includes syntax colouring, error-line marking, open/save, and examples, including the 15 from mumax.github.io. Ctrl+Enter runs. |
 | **Files** | Outputs per run (`<name>.out/`): view `.ovf`, plot `table.txt`, download. Upload STL / PNG / CSV files for shapes and waveforms. |
 | Viewer | Any quantity (m, B_eff, B_demag, torques, SOTorque, MFM, ...) as the mumax3 colour wheel or one component, with arrows, layer slider and hover readout. |
-| Plot, Console | The plot shows live table columns, with hover readout and CSV export. The console shows the run log; commands typed there run between solver steps. |
+| Plot, Console | The plot shows table columns chosen from two drop-down menus (*plot* … *against* …), with a legend, hover readout and CSV export. The console shows the run log; commands typed there run between solver steps. |
 
 ### Geometry builder
 
@@ -299,8 +301,10 @@ Poisson solver, moving windows, inter-sublattice DMI.
 
 ### Claude
 
-* **Subscription (Pro/Max):** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once and
-  sign in, then press *Check again* in the Claude panel.
+* **Subscription (Pro/Max):** the panel stays locked until Claude is authorized. Install Claude Code
+  (`irm https://claude.ai/install.ps1 | iex` on Windows, `curl -fsSL https://claude.ai/install.sh | bash` elsewhere),
+  then press *Sign in with Claude* and sign in with your Pro or Max account; the panel unlocks by itself. *Usage*
+  shows how much of the plan's limits is used.
 * **API key:** paste it in the panel (stored in `~/.mumaxstudio/config.json`, user-only) or set `ANTHROPIC_API_KEY`;
   pip installs also need `pip install anthropic`.
 * **Let Claude run simulations:** *Connect Claude Desktop* / *Connect Claude Code* in the panel, or

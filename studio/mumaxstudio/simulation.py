@@ -490,7 +490,11 @@ class Simulation(CaseInsensitive):
         rid = int(rid)
         if not 0 <= rid < NREGION:
             raise ValueError("region id must be 0..255")
-        mask = shape(*mesh.coords(self.shift_xy))
+        if not isinstance(shape, S.Shape):   # a Python function inside(x, y, z), as SetGeom accepts
+            from .extensions import FuncShape
+
+            shape = FuncShape(shape)
+        mask = np.broadcast_to(np.asarray(shape(*mesh.coords(self.shift_xy)), dtype=bool), self.regions.shape)
         self.regions[mask] = rid
         self._regions_changed()
 
@@ -1087,6 +1091,9 @@ class Simulation(CaseInsensitive):
             row += q.average()
         self.table_rows.append(row)
         f = self._table_file
+        if f is None:   # closed when the previous run ended (so the file can be deleted); continue the same table
+            f = open(os.path.join(self.ensure_out_dir(), "table.txt"), "a", encoding="utf-8")
+            self.__dict__["_table_file"] = f
         f.write("\t".join(f"{v:.10g}" for v in row) + "\n")
         f.flush()
 

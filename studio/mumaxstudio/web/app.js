@@ -1,6 +1,7 @@
 "use strict";
 /* mumax Studio front-end (no external dependencies). Geometry builder: geometry.js, drive designer: drive.js,
-   waveform library: waveforms.js. This file: session, forms → script, editor, run control, viewer, plot, files. */
+   waveform library: waveforms.js. This file: session, forms → script, editor, run control, output folder,
+   viewer (one panel: 3D field / OVF player / geometry), plot, files. */
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -41,7 +42,13 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-function showTokenModal() { $("#tokenModal").hidden = false; $("#tokenInput").focus(); }
+function hideSplash() {
+  const s = $("#splash");
+  if (!s || s.classList.contains("gone")) return;
+  s.classList.add("gone");
+  setTimeout(() => s.remove(), 400);
+}
+function showTokenModal() { hideSplash(); $("#tokenModal").hidden = false; $("#tokenInput").focus(); }
 $("#tokenOk").addEventListener("click", () => {
   TOKEN = $("#tokenInput").value.trim().replace(/^.*token=/, "");
   try { sessionStorage.setItem("studioToken", TOKEN); } catch (e) { /* ignore */ }
@@ -398,9 +405,175 @@ async function downloadWorkspaceFile(path) {
   }
   try { downloadBlob(await api("/api/file?path=" + encodeURIComponent(path), { blob: true }), name); } catch (e) { logLine("ERROR: " + e.message); }
 }
-$("#btnDownloadScript").addEventListener("click", () => {
+// ------------------------------------------------------------------ output folder
+// Everything a run writes goes to <output folder>/<name>.out, plus a copy of the script next to it. The folder is
+// shown in the top bar, before every run (unless switched off) and on the Files page, and can be changed any time.
+let workspace = "", pathSep = "\\", folderChosen = true;
+const nativeApi = (fn) => window.pywebview && window.pywebview.api && window.pywebview.api[fn] ? window.pywebview.api[fn] : null;
+const jobNameClean = () => ($("#jobName").value || "untitled").replace(/[^\w-]/g, "_") || "untitled";
+function shortPath(p, max = 48) {
+  if (!p || p.length <= max) return p || "";
+  const parts = p.split(/[\\/]/);
+  let tail = parts.pop();
+  while (parts.length > 1 && tail.length + parts[parts.length - 1].length + 6 < max) tail = parts.pop() + pathSep + tail;
+  return parts[0] + pathSep + "…" + pathSep + tail;
+}
+let outTimer = 0;
+function refreshOutPath() {
+  clearTimeout(outTimer);
+  outTimer = setTimeout(async () => {
+    try {
+      const r = await api(`/api/outinfo?name=${encodeURIComponent(jobNameClean())}&lang=${$("#selLang").value}`);
+      workspace = r.workspace;
+      if (r.chosen === false) folderChosen = false;
+      $("#btnFolder").classList.toggle("unset", !folderChosen);
+      $("#outPath").textContent = folderChosen ? shortPath(r.out_dir) : "not set: click to choose";
+      $("#btnFolder").title = folderChosen
+        ? `The next run writes its results to\n  ${r.out_dir}\nand keeps the script as\n  ${r.script}\n\nClick to choose another output folder.`
+        : "No output folder is set yet. Click to choose where simulations and scripts are saved; runs start only after that.";
+      $("#wsPath").textContent = r.workspace; $("#wsPath").title = r.workspace;
+    } catch (e) { /* server not reachable yet */ }
+  }, 120);
+}
+function modalOpen() { return $$(".modal").some((m) => !m.hidden); }
+function showModal(id, focus) { $(id).hidden = false; if (focus) setTimeout(() => { $(focus).focus(); $(focus).select && $(focus).select(); }, 0); }
+let folderDone = null;
+async function openFolderModal(onDone, required) {
+  folderDone = onDone || null;
+  $("#folderNeed").hidden = !required;
+  $("#folderTitle").textContent = required ? "Where should the results be saved?" : "Output folder";
+  let r;
+  try { r = await api("/api/workspace"); } catch (e) { logLine("ERROR: " + e.message); return; }
+  pathSep = r.sep || pathSep;
+  $("#folderInput").value = r.workspace;
+  $("#folderErr").hidden = true;
+  $("#folderBrowse").hidden = !nativeApi("choose_folder");
+  $("#folderAsk").checked = settings.confirm_run !== false;
+  $("#folderDefault").dataset.path = r.default;
+  const rec = $("#folderRecent");
+  rec.innerHTML = "";
+  for (const f of (r.recent || []).filter((x) => x !== r.workspace).slice(0, 6)) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = f; b.title = "Use " + f;
+    b.addEventListener("click", () => { $("#folderInput").value = f; });
+    rec.appendChild(b);
+  }
+  if (rec.childNodes.length) rec.insertAdjacentHTML("afterbegin", '<span class="small muted">Recent</span>');
+  showModal("#folderModal", "#folderInput");
+}
+function closeFolderModal(ok) {
+  $("#folderModal").hidden = true;
+  const f = folderDone; folderDone = null;
+  if (f) f(ok);
+}
+async function applyFolder() {
+  const ask = $("#folderAsk").checked;
+  if ((settings.confirm_run !== false) !== ask) saveSetting("confirm_run", ask);
+  try {
+    const r = await api("/api/workspace", { body: { path: $("#folderInput").value } });
+    workspace = r.workspace;
+    folderChosen = true;
+    toast("Output folder: " + r.workspace);
+    logLine("// output folder: " + r.workspace);
+    refreshOutPath();
+    if (page === "files") loadFiles();
+    closeFolderModal(true);
+  } catch (e) { $("#folderErr").textContent = e.message; $("#folderErr").hidden = false; }
+}
+$("#btnFolder").addEventListener("click", () => openFolderModal());
+$("#btnChangeFolder").addEventListener("click", () => openFolderModal());
+$("#folderOk").addEventListener("click", applyFolder);
+$("#folderCancel").addEventListener("click", () => closeFolderModal(false));
+$("#folderDefault").addEventListener("click", (e) => { $("#folderInput").value = e.currentTarget.dataset.path || ""; });
+$("#folderInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyFolder(); } });
+$("#folderBrowse").addEventListener("click", async () => {
+  const f = nativeApi("choose_folder");
+  if (!f) return;
+  try { const p = await f($("#folderInput").value); if (p) $("#folderInput").value = p; } catch (e) { logLine("ERROR: " + e); }
+});
+$("#jobName").addEventListener("input", refreshOutPath);
+$("#selLang").addEventListener("change", refreshOutPath);
+$("#btnOpenFolder").addEventListener("click", async () => {
+  const f = nativeApi("open_folder");
+  if (f) try { await f(""); } catch (e) { logLine("ERROR: " + e); }
+});
+window.addEventListener("pywebviewready", () => { $("#btnOpenFolder").hidden = !nativeApi("open_folder"); });
+
+// Save script: always shows the full path first; any folder on this computer can be typed or browsed to.
+let lastSaveDir = "";
+async function openSaveModal() {
   const ext = $("#selLang").value === "py" ? ".py" : ".mx3";
-  downloadBlob(new Blob([editor.value], { type: "text/plain" }), ($("#jobName").value || "script") + ext);
+  try { const r = await api("/api/workspace"); workspace = r.workspace; pathSep = r.sep || pathSep; } catch (e) { /* keep last */ }
+  const dir = lastSaveDir || workspace;
+  $("#saveInput").value = dir ? dir.replace(/[\\/]+$/, "") + pathSep + jobNameClean() + ext : jobNameClean() + ext;
+  $("#saveErr").hidden = true;
+  $("#saveBrowse").hidden = !nativeApi("choose_save_path");
+  showModal("#saveModal", "#saveInput");
+}
+async function saveScript(overwrite = false) {
+  const path = $("#saveInput").value.trim();
+  try {
+    const r = await api("/api/save_script", { body: { path, text: editor.value, overwrite } });
+    if (r.exists) {
+      if (confirm(`${r.path}\nalready exists. Replace it?`)) return saveScript(true);
+      return;
+    }
+    $("#saveModal").hidden = true;
+    lastSaveDir = r.path.replace(/[\\/][^\\/]*$/, "");
+    toast("Saved " + r.path);
+    logLine("// script saved: " + r.path);
+    if (page === "files") loadFiles();
+  } catch (e) { $("#saveErr").textContent = e.message; $("#saveErr").hidden = false; }
+}
+$("#btnDownloadScript").addEventListener("click", openSaveModal);
+$("#saveOk").addEventListener("click", () => saveScript(false));
+$("#saveCancel").addEventListener("click", () => { $("#saveModal").hidden = true; });
+$("#saveInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveScript(false); } });
+$("#saveBrowse").addEventListener("click", async () => {
+  const f = nativeApi("choose_save_path");
+  if (!f) return;
+  const name = $("#saveInput").value.split(/[\\/]/).pop();
+  try { const p = await f(name); if (p) $("#saveInput").value = p; } catch (e) { logLine("ERROR: " + e); }
+});
+$("#saveDownload").addEventListener("click", () => {
+  const name = $("#saveInput").value.split(/[\\/]/).pop() || jobNameClean() + ".mx3";
+  $("#saveModal").hidden = true;
+  downloadBlob(new Blob([editor.value], { type: "text/plain" }), name);
+});
+
+// Before a run: where the results and the script copy go. "Don't ask again" leaves only the top-bar chip.
+function confirmRun(body) {
+  return new Promise(async (resolve) => {
+    let r;
+    try { r = await api(`/api/outinfo?name=${encodeURIComponent(body.name)}&lang=${body.lang}`); } catch (e) { resolve(true); return; }
+    $("#runName").textContent = r.name;
+    $("#runOut").textContent = r.out_dir + pathSep;
+    $("#runScript").textContent = r.script;
+    const warn = [];
+    if (r.exists && r.replaced) warn.push(`${r.name}.out already exists: its ${r.replaced} result file(s) (.ovf, .png, .txt, .csv, .npy) are replaced. Rename the simulation to keep them.`);
+    if (state === "running" || state === "paused") warn.push("The simulation that is running now is stopped first.");
+    $("#runWarn").textContent = warn.join(" ");
+    $("#runWarn").hidden = !warn.length;
+    $("#runNoAsk").checked = false;
+    const done = (ok) => {
+      $("#runModal").hidden = true;
+      $("#runOk").onclick = $("#runCancel").onclick = $("#runFolder").onclick = null;
+      resolve(ok);
+    };
+    $("#runOk").onclick = () => { if ($("#runNoAsk").checked) { saveSetting("confirm_run", false); toast("The output path stays in the top bar. Ask again: folder chip → “Ask before every run”."); } done(true); };
+    $("#runCancel").onclick = () => done(false);
+    $("#runFolder").onclick = () => {
+      $("#runModal").hidden = true;
+      openFolderModal(() => { confirmRun(body).then(resolve); });
+    };
+    showModal("#runModal", "#runOk");
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("#runModal").hidden) $("#runCancel").click();
+  else if (!$("#saveModal").hidden) $("#saveModal").hidden = true;
+  else if (!$("#folderModal").hidden) closeFolderModal(false);
 });
 
 // ------------------------------------------------------------------ run control
@@ -408,7 +581,16 @@ let state = "idle";
 let logSeq = 0;
 let table = { header: null, rows: [] };
 
+let runAsking = false;
 async function run() {
+  if (runAsking || modalOpen()) return;
+  if (!folderChosen) {   // nothing runs until the user has said where the results go
+    toast("Select where to save the results first");
+    runAsking = true;
+    const ok = await new Promise((res) => openFolderModal(res, true));
+    runAsking = false;
+    if (!ok || !folderChosen) { logLine("// run cancelled: no output folder chosen"); return; }
+  }
   if (!editor.value.trim() || page !== "script" && editor.value === lastGenerated) {
     const g = generateScript();
     setEditor(g.text, g.lang);
@@ -418,6 +600,12 @@ async function run() {
     name: ($("#jobName").value || "untitled").replace(/[^\w-]/g, "_"), script: editor.value, lang: $("#selLang").value,
     device: $("#selBackend").value, precision: $("#selPrecision").value,
   };
+  if (settings.confirm_run !== false) {
+    runAsking = true;
+    const ok = await confirmRun(body);
+    runAsking = false;
+    if (!ok) return;
+  }
   lastError = "";
   logSeq = 0;
   table = { header: null, rows: [] };
@@ -426,13 +614,17 @@ async function run() {
   errorLine = null;
   $("#errorBar").hidden = true;
   syncEditor();
-  viewSource = "live";
-  $("#chkAuto").checked = true;
+  $("#v3source").value = "live";
+  VIEW3D.play(false);
   try {
-    await api("/api/run", { body });
+    const r = await api("/api/run", { body });
+    if (r.need_folder) { folderChosen = false; refreshOutPath(); setState("idle"); return run(); }
+    if (r.error) { logLine("ERROR: " + r.error); return; }
+    if (r.out_dir) toast("Writing to " + r.out_dir);
     setState("running");
     redraw();
     pollSoon();
+    refreshOutPath();
   } catch (e) { logLine("ERROR: " + e.message); }
 }
 $("#btnRun").addEventListener("click", run);
@@ -516,15 +708,11 @@ function handleStatus(s) {
   $("#stSpeed").textContent = s.speed ? `${Math.round(s.speed).toLocaleString()}/s` : "–";
   runningDevice = st.device || "";
   showDeviceInfo();
-  const sel = $("#selQuantity");
+  const q3 = $("#v3quantity");
   const want = (s.quantities || []).join("|");
-  if (sel.dataset.list !== want && s.quantities) {
-    const cur = sel.value;
-    sel.innerHTML = "";
-    for (const q of s.quantities) { const o = document.createElement("option"); o.value = o.textContent = q; sel.appendChild(o); }
-    sel.value = s.quantities.includes(cur) ? cur : "m";
-    sel.dataset.list = want;
-    const q3 = $("#v3quantity"), cur3 = q3.value;
+  if (q3.dataset.list !== want && s.quantities) {
+    q3.dataset.list = want;
+    const cur3 = q3.value;
     q3.innerHTML = "";
     for (const q of s.quantities) { const o = document.createElement("option"); o.value = o.textContent = q; q3.appendChild(o); }
     q3.value = s.quantities.includes(cur3) ? cur3 : "m";
@@ -548,12 +736,9 @@ function handleStatus(s) {
     if (s.error_line) { errorLine = s.error_line; syncEditor(); }
     if (prev !== "error") switchTab("script");
   }
-  if (viewSource === "live" && $("#chkAuto").checked && st.mesh && !geometryMode()) {
-    if (s.state === "running" || prev !== s.state || !lastField) fetchField();
-  }
-  if (st.mesh && LAYOUT.isOpen("view3d") && $("#v3source").value === "live") {
+  if (st.mesh && LAYOUT.isOpen("view") && $("#v3source").value === "live" && !geometryMode()) {
     const now = performance.now();
-    if ((s.state === "running" && now - last3d > 1500) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
+    if ((s.state === "running" && now - last3d > 1000) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
   }
 }
 let last3d = 0, busy3d = false;
@@ -624,16 +809,39 @@ function setLayers(nz) {
 }
 
 // ------------------------------------------------------------------ viewer
-const view = $("#view");
-const viewWrap = $("#viewWrap");
-let lastField = null;
-let fieldBusy = false;
-let lastFieldTime = 0;
-let viewSource = "live";
+// One panel. Outside the Geometry page it is the 3D viewer (live simulation or OVF files). On the Geometry page it
+// shows the magnet being built: "2D edit" is the top view of one layer where shapes are dragged, "3D" the whole body.
+const view = $("#view");          // 2D canvas of the geometry editor
+const viewWrap = $("#v3wrap");
+let geoView = "2d";
 
-function info(t) { $("#viewInfo").textContent = t; }
+function info(t) { $("#v3info").textContent = t; }
+function geoEdit2d() { return geometryMode() && geoView === "2d"; }
 function redraw() {
-  if (geometryMode()) drawGeometry(); else drawField();
+  const g = geometryMode(), two = g && geoView === "2d";
+  $("#geoCtl").hidden = !g;
+  $("#v3ctl").hidden = g;
+  $("#v3style").hidden = g;
+  $("#v3slice").hidden = two;
+  $("#v3cam").hidden = two;
+  $("#layerCtl").hidden = !two;
+  $$("[data-geoview]").forEach((b) => b.classList.toggle("on", b.dataset.geoview === geoView));
+  $("#viewTitle").textContent = g ? "Geometry" : "Viewer";
+  view.hidden = !two;
+  $("#view3d").hidden = two;
+  if (g) { $("#v3frames").hidden = true; $("#v3empty").hidden = true; $("#v3legend").hidden = true; }
+  else $("#v3legend").hidden = false;
+  if (two) { drawGeometry(); return; }
+  if (g) {
+    VIEW3D.geometry(true, geo3.field);
+    requestGeom3d();
+    VIEW3D.draw();
+    info(geo3.info || "computing the 3D geometry…");
+    return;
+  }
+  VIEW3D.geometry(false);
+  VIEW3D.draw();
+  v3info();
 }
 function drawGeometry() {
   const ctx = view.getContext("2d");
@@ -642,221 +850,41 @@ function drawGeometry() {
   view.width = Math.max(1, W * dpr); view.height = Math.max(1, H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  $("#viewEmpty").hidden = true;
-  $("#legend").hidden = true;
-  $("#viewTitle").textContent = "Geometry";
   setLayers(GEOM.mesh().n[2]);
   info(GEOM.draw(ctx, W, H, Number($("#layer").value), cssVar));
 }
-GEOM.attach(view, viewWrap, geometryMode);
+GEOM.attach(view, viewWrap, geoEdit2d);
 
-async function fetchField(force = false) {
-  if (fieldBusy) return;
-  const now = performance.now();
-  if (!force && now - lastFieldTime < 600) return;
-  fieldBusy = true;
-  lastFieldTime = now;
-  try {
-    const q = encodeURIComponent($("#selQuantity").value || "m");
-    const buf = await api(`/api/field?q=${q}&layer=${$("#layer").value}&max=320`, { binary: true });
-    lastField = parseField(buf);
-    if (!geometryMode()) drawField();
-  } catch (e) {
-    if (!geometryMode()) info(e.message);
-  } finally { fieldBusy = false; }
+// 3D geometry: the server rasterises the shapes on the whole mesh; cells are coloured by region
+const geo3 = { key: "", field: null, info: "", timer: 0, seq: 0 };
+function requestGeom3d() {
+  clearTimeout(geo3.timer);
+  geo3.timer = setTimeout(async () => {
+    const body = GEOM.previewBody(0);
+    const key = JSON.stringify(body);
+    if (key === geo3.key && geo3.field) return;
+    const seq = ++geo3.seq;
+    try {
+      const buf = await api("/api/preview_geom3d", { body, binary: true });
+      if (seq !== geo3.seq) return;
+      const hl0 = new DataView(buf).getUint32(0, true);
+      const h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl0)));
+      geo3.field = OVF.fromStudio(buf);
+      geo3.key = key;
+      geo3.info = `${h.cells.toLocaleString()} of ${h.total.toLocaleString()} cells magnetic · colour = region` +
+        (h.stride && h.stride[0] > 1 ? ` · shown every ${h.stride[0]} cells` : "") + (h.error ? ` · ${h.error}` : "");
+      if (geometryMode() && geoView === "3d") { VIEW3D.geometry(true, geo3.field); info(geo3.info); }
+    } catch (e) { if (seq === geo3.seq && geometryMode()) info("geometry preview: " + e.message); }
+  }, 250);
 }
-function parseField(buf) {
-  const dv = new DataView(buf);
-  const hl0 = dv.getUint32(0, true);
-  const hdr = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl0)));
-  const n = hdr.nx * hdr.ny;
-  const data = new Float32Array(buf, 4 + hl0, hdr.ncomp * n);
-  const geom = new Uint8Array(buf, 4 + hl0 + 4 * hdr.ncomp * n, n);
-  return { hdr, data, geom };
-}
-
-function hsl2rgb(h, s, l) {
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-  const f = (t) => {
-    t = ((t % 1) + 1) % 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 0.5) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
-}
-const VIRIDIS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
-function seqColor(t) {
-  t = Math.min(1, Math.max(0, t)) * (VIRIDIS.length - 1);
-  const i = Math.min(VIRIDIS.length - 2, Math.floor(t)), f = t - i;
-  return VIRIDIS[i].map((c, k) => c + (VIRIDIS[i + 1][k] - c) * f);
-}
-function divColor(t) { // blue - white - red, 0.5 = white
-  t = Math.min(1, Math.max(0, t));
-  if (t < 0.5) { const u = t * 2; return [40 + 215 * u, 86 + 169 * u, 200 + 55 * u]; }
-  const u = (t - 0.5) * 2;
-  return [255 - 41 * u, 255 - 185 * u, 255 - 197 * u];
-}
-
-let viewGeom = null;
-function drawField() {
-  const Fd = lastField;
-  const ctx = view.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  const W = view.clientWidth, H = view.clientHeight;
-  view.width = Math.max(1, W * dpr);
-  view.height = Math.max(1, H * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, W, H);
-  $("#viewEmpty").hidden = !!Fd;
-  $("#legend").hidden = !Fd;
-  $("#viewTitle").textContent = Fd ? (viewSource === "file" ? "File" : "Field") : "Field";
-  if (!Fd) { info(" "); return; }
-  const { hdr, data, geom } = Fd;
-  const nx = hdr.nx, ny = hdr.ny, n = nx * ny;
-  const compSel = $("#selComp").value;
-  const vector = hdr.ncomp === 3 && compSel === "v";
-  const comp = hdr.ncomp === 1 ? 0 : (compSel === "v" ? 2 : Math.min(Number(compSel), hdr.ncomp - 1));
-  const img = new ImageData(nx, ny);
-  let lo = 0, hi = 1, diverging = false;
-  if (!vector) {
-    lo = Infinity; hi = -Infinity;
-    for (let i = 0; i < n; i++) { if (!geom[i] && hdr.name.startsWith("m")) continue; const v = data[comp * n + i]; if (v < lo) lo = v; if (v > hi) hi = v; }
-    if (!isFinite(lo)) { lo = 0; hi = 1; }
-    if (lo < 0 && hi > 0) { const a = Math.max(-lo, hi); lo = -a; hi = a; diverging = true; }
-    if (hi === lo) hi = lo + 1;
-  }
-  for (let iy = 0; iy < ny; iy++) {
-    for (let ix = 0; ix < nx; ix++) {
-      const i = iy * nx + ix;
-      const o = ((ny - 1 - iy) * nx + ix) * 4;
-      if (!geom[i]) { img.data[o + 3] = 0; continue; }
-      let rgb;
-      if (vector) {
-        const x = data[i], y = data[n + i], z = data[2 * n + i];
-        const len = Math.hypot(x, y, z) || 1;
-        rgb = hsl2rgb(Math.atan2(y, x) / (2 * Math.PI), 1, 0.5 * z / len + 0.5);
-      } else {
-        const t = (data[comp * n + i] - lo) / (hi - lo);
-        rgb = diverging ? divColor(t) : seqColor(t);
-      }
-      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
-    }
-  }
-  const off = document.createElement("canvas");
-  off.width = nx; off.height = ny;
-  off.getContext("2d").putImageData(img, 0, 0);
-  const ds = hdr.downsample;
-  const pw = nx * ds * hdr.cell[0], ph = ny * ds * hdr.cell[1];
-  const pad = 16;
-  const sc = Math.min((W - 2 * pad) / pw, (H - 2 * pad) / ph);
-  const dw = pw * sc, dh = ph * sc, x0 = (W - dw) / 2, y0 = (H - dh) / 2;
-  ctx.fillStyle = cssVar("--panel-2");
-  ctx.fillRect(x0, y0, dw, dh);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(off, x0, y0, dw, dh);
-  ctx.strokeStyle = cssVar("--line-2");
-  ctx.strokeRect(x0 - 0.5, y0 - 0.5, dw + 1, dh + 1);
-  viewGeom = { x0, y0, dw, dh, nx, ny };
-  if (hdr.ncomp === 3 && $("#chkArrows").checked) drawArrows(ctx, Fd, viewGeom);
-  drawLegend(vector, lo, hi, diverging, hdr);
-  const dims = `${hdr.n[0]}×${hdr.n[1]}×${hdr.n[2]}` + (ds > 1 ? ` (shown 1:${ds})` : "");
-  info(`${hdr.name}${hdr.unit ? " [" + hdr.unit + "]" : ""} · layer ${hdr.layer} · ${dims} · t = ${fmtSI(hdr.t, "s")}`);
-}
-function drawArrows(ctx, Fd, g) {
-  const { data, geom } = Fd, { nx, ny, x0, y0, dw, dh } = g, n = nx * ny;
-  const step = Math.max(1, Math.round(Math.max(nx, ny) / 26));
-  const cw = dw / nx, chh = dh / ny;
-  const L = Math.min(cw, chh) * step * 0.42;
-  ctx.lineWidth = 1.2;
-  for (let by = 0; by < ny; by += step) {
-    for (let bx = 0; bx < nx; bx += step) {
-      let sx = 0, sy = 0, sz = 0, c = 0;
-      for (let yy = by; yy < Math.min(ny, by + step); yy++) for (let xx = bx; xx < Math.min(nx, bx + step); xx++) {
-        const i = yy * nx + xx;
-        if (!geom[i]) continue;
-        sx += data[i]; sy += data[n + i]; sz += data[2 * n + i]; c++;
-      }
-      if (c < step * step * 0.5) continue;
-      const len = Math.hypot(sx, sy, sz);
-      if (len === 0) continue;
-      const ux = sx / len, uy = sy / len, uz = sz / len;
-      const cx = x0 + (bx + Math.min(step, nx - bx) / 2) * cw;
-      const cy = y0 + dh - (by + Math.min(step, ny - by) / 2) * chh;
-      const ax = ux * L, ay = -uy * L;
-      ctx.strokeStyle = ctx.fillStyle = uz > 0.2 ? "rgba(0,0,0,.65)" : "rgba(255,255,255,.85)";
-      if (Math.hypot(ux, uy) < 0.15) {
-        ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.2, L * 0.18), 0, 2 * Math.PI);
-        if (uz > 0) ctx.fill(); else ctx.stroke();
-        continue;
-      }
-      ctx.beginPath(); ctx.moveTo(cx - ax, cy - ay); ctx.lineTo(cx + ax, cy + ay); ctx.stroke();
-      const ang = Math.atan2(ay, ax), hs = Math.max(2.5, L * 0.45);
-      ctx.beginPath();
-      ctx.moveTo(cx + ax, cy + ay);
-      ctx.lineTo(cx + ax - hs * Math.cos(ang - 0.45), cy + ay - hs * Math.sin(ang - 0.45));
-      ctx.lineTo(cx + ax - hs * Math.cos(ang + 0.45), cy + ay - hs * Math.sin(ang + 0.45));
-      ctx.closePath(); ctx.fill();
-    }
-  }
-}
-function drawLegend(vector, lo, hi, diverging, hdr) {
-  const lg = $("#legend"), c = $("#legendCanvas"), txt = $("#legendText");
-  const ctx = c.getContext("2d");
-  lg.classList.toggle("bar", !vector);
-  if (vector) {
-    c.width = c.height = 120;
-    const im = ctx.createImageData(120, 120);
-    for (let y = 0; y < 120; y++) for (let x = 0; x < 120; x++) {
-      const dx = (x - 59.5) / 58, dy = (59.5 - y) / 58, r = Math.hypot(dx, dy), o = (y * 120 + x) * 4;
-      if (r > 1) { im.data[o + 3] = 0; continue; }
-      const z = Math.sqrt(Math.max(0, 1 - r * r));
-      const rgb = hsl2rgb(Math.atan2(dy, dx) / (2 * Math.PI), 1, 0.5 * z + 0.5);
-      im.data[o] = rgb[0]; im.data[o + 1] = rgb[1]; im.data[o + 2] = rgb[2]; im.data[o + 3] = 255;
-    }
-    ctx.putImageData(im, 0, 0);
-    txt.textContent = "hue = in-plane · white = +z";
-  } else {
-    c.width = 18; c.height = 120;
-    for (let y = 0; y < 120; y++) {
-      const t = 1 - y / 119;
-      const rgb = diverging ? divColor(t) : seqColor(t);
-      ctx.fillStyle = `rgb(${rgb[0] | 0},${rgb[1] | 0},${rgb[2] | 0})`;
-      ctx.fillRect(0, y, 18, 1);
-    }
-    txt.innerHTML = "";
-    const u = hdr.unit || "";
-    txt.append(`max ${fmtNum(hi)} ${u}`, document.createElement("br"), `min ${fmtNum(lo)} ${u}`);
-  }
-}
-view.addEventListener("mousemove", (e) => {
-  if (geometryMode() || !lastField || !viewGeom) return;
-  const r = view.getBoundingClientRect();
-  const g = viewGeom, x = e.clientX - r.left, y = e.clientY - r.top;
-  const ix = Math.floor((x - g.x0) / g.dw * g.nx), iyTop = Math.floor((y - g.y0) / g.dh * g.ny);
-  if (ix < 0 || ix >= g.nx || iyTop < 0 || iyTop >= g.ny) return;
-  const iy = g.ny - 1 - iyTop;
-  const { hdr, data, geom } = lastField;
-  const n = hdr.nx * hdr.ny, i = iy * hdr.nx + ix, ds = hdr.downsample;
-  const vals = [];
-  for (let c = 0; c < hdr.ncomp; c++) vals.push(fmtNum(data[c * n + i]));
-  info(`cell (${ix * ds}, ${iy * ds}, ${hdr.layer})  ${geom[i] ? hdr.name + " = (" + vals.join(", ") + ")" : "outside the magnet"}`);
-});
-$("#selQuantity").addEventListener("change", () => { viewSource = "live"; fetchField(true); });
+$$("[data-geoview]").forEach((b) => b.addEventListener("click", () => {
+  geoView = b.dataset.geoview;
+  saveSetting("geo_view", geoView);
+  if (geoView === "2d") GEOM.requestPreview(Number($("#layer").value));
+  redraw();
+}));
 $("#layer").addEventListener("input", () => { $("#layerVal").textContent = $("#layer").value; });
-$("#layer").addEventListener("change", () => {
-  if (geometryMode()) GEOM.requestPreview(Number($("#layer").value));
-  else { viewSource = "live"; fetchField(true); }
-});
-["#selComp", "#chkArrows"].forEach((s) => $(s).addEventListener("change", redraw));
-$("#btnRefreshView").addEventListener("click", () => {
-  if (geometryMode()) GEOM.requestPreview(Number($("#layer").value));
-  else { viewSource = "live"; fetchField(true); }
-});
-$("#btnSavePng").addEventListener("click", () => {
-  view.toBlob((b) => b && downloadBlob(b, `${geometryMode() ? "geometry" : lastField ? lastField.hdr.name : "view"}.png`));
-});
+$("#layer").addEventListener("change", () => { if (geometryMode()) GEOM.requestPreview(Number($("#layer").value)); });
 let resizeRaf = 0;
 function relayout() {
   cancelAnimationFrame(resizeRaf);
@@ -865,6 +893,7 @@ function relayout() {
 const resizeObs = new ResizeObserver(relayout);
 resizeObs.observe(document.body);
 $$(".canvaswrap").forEach((c) => resizeObs.observe(c));
+resizeObs.observe($("#v3wrap"));
 
 // ------------------------------------------------------------------ plot
 const plot = $("#plot");
@@ -874,29 +903,58 @@ let staticTable = null;
 let plotHover = null;
 
 function plotTable() { return plotSource === "live" ? table : staticTable; }
+// The toolbar holds two drop-down menus: "plot: <columns>" (one or more, with checkboxes) and "against <x>". The
+// choice is kept by column name while the table grows and when the next run has the same columns.
+let plotPick = { x: null, ys: null };
 function setupPlotColumns() {
   const t = plotTable();
   const selX = $("#selX"), yc = $("#yCols");
   selX.innerHTML = ""; yc.innerHTML = "";
-  if (!t || !t.header) { drawPlot(); return; }
+  if (!t || !t.header) { updateYLabel(); drawPlot(); return; }
+  const names = t.header.map((h) => h[0]);
+  const xName = plotPick.x && names.includes(plotPick.x) ? plotPick.x : names[0];
+  let ys = (plotPick.ys || []).filter((n) => names.includes(n) && n !== xName);
+  if (!ys.length) ys = names.filter((n) => ["mx", "my", "mz"].includes(n));
+  if (!ys.length) ys = names.slice(1, 2);
   t.header.forEach(([name, unit], i) => {
     const o = document.createElement("option");
     o.value = i; o.textContent = name + (unit ? ` (${unit})` : "");
     selX.appendChild(o);
-    if (i === 0) return;
     const lab = document.createElement("label");
     const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.value = i; cb.checked = ["mx", "my", "mz"].includes(name) || (t.header.length < 5 && i > 0);
-    cb.addEventListener("change", drawPlot);
+    cb.type = "checkbox"; cb.value = i; cb.checked = ys.includes(name);
+    cb.addEventListener("change", () => { rememberPick(); updateYLabel(); drawPlot(); });
     const sw = document.createElement("span");
-    sw.className = "sw"; sw.style.background = SERIES[(i - 1) % SERIES.length];
-    lab.append(cb, sw, name);
+    sw.className = "sw"; sw.style.background = SERIES[(i - 1 + SERIES.length) % SERIES.length];
+    const un = document.createElement("span");
+    un.className = "unit"; un.textContent = unit || "";
+    lab.append(cb, sw, name, un);
+    lab.dataset.name = name;
     yc.appendChild(lab);
   });
-  selX.value = 0;
+  selX.value = names.indexOf(xName);
+  hideXInY();
+  updateYLabel();
   drawPlot();
 }
-$("#selX").addEventListener("change", drawPlot);
+function hideXInY() {   // the x column is not offered as a y column
+  const xi = Number($("#selX").value) || 0;
+  $$("#yCols label").forEach((l, i) => { l.hidden = i === xi; if (i === xi) l.querySelector("input").checked = false; });
+}
+function rememberPick() {
+  const t = plotTable();
+  if (!t || !t.header) return;
+  plotPick = { x: t.header[Number($("#selX").value) || 0][0], ys: $$("#yCols input:checked").map((c) => t.header[Number(c.value)][0]) };
+}
+function updateYLabel() {
+  const t = plotTable();
+  const ys = t && t.header ? $$("#yCols input:checked").map((c) => t.header[Number(c.value)][0]) : [];
+  $("#yLabel").textContent = ys.length ? ys.join(", ") : "choose";
+  $("#yBtn").title = ys.length ? `Plotted: ${ys.join(", ")}. Click to choose other columns.` : "Choose the columns to plot";
+}
+$("#selX").addEventListener("change", () => { hideXInY(); rememberPick(); updateYLabel(); drawPlot(); });
+$("#yNone").addEventListener("click", () => { $$("#yCols input").forEach((c) => { c.checked = false; }); rememberPick(); updateYLabel(); drawPlot(); });
+document.addEventListener("click", (e) => { const m = $("#yMenu"); if (m.open && !m.contains(e.target)) m.open = false; });
 function niceTicks(lo, hi, n = 5) {
   const span = hi - lo || Math.abs(hi) || 1;
   const step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
@@ -904,6 +962,10 @@ function niceTicks(lo, hi, n = 5) {
   const out = [];
   for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
   return out;
+}
+function tickDigits(lo, hi, n) {   // significant digits that keep neighbouring tick labels distinct
+  const step = (hi - lo) / Math.max(2, Math.floor(n)) || 1, big = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+  return Math.min(8, Math.max(3, Math.ceil(Math.log10(big / step)) + 1));
 }
 function drawPlot() {
   const ctx = plot.getContext("2d");
@@ -929,12 +991,21 @@ function drawPlot() {
     const x = r[xi]; if (x < x0) x0 = x; if (x > x1) x1 = x;
     for (const j of ys) { const y = r[j]; if (isFinite(y)) { if (y < y0) y0 = y; if (y > y1) y1 = y; } }
   }
-  if (!ys.length || !isFinite(y0)) { y0 = -1; y1 = 1; }
+  if (!ys.length) {
+    ctx.fillStyle = muted; ctx.textAlign = "center";
+    ctx.font = "12px " + cssVar("--font-ui");
+    ctx.fillText("Choose what to plot from the “plot” menu above.", W / 2, H / 2);
+    return;
+  }
+  if (!isFinite(y0)) { y0 = -1; y1 = 1; }
   if (x1 === x0) x1 = x0 + 1;
   if (y1 === y0) { y0 -= 0.5; y1 += 0.5; }
   const pady = (y1 - y0) * 0.06; y0 -= pady; y1 += pady;
-  const L = 58, R = 12, T = 10, B = 30;
-  const pw = W - L - R, ph = H - T - B;
+  const T = 10, R = 12, B = 30, ph = H - T - B;
+  const yd = tickDigits(y0, y1, ph / 40);
+  const yticks = niceTicks(y0, y1, Math.max(2, Math.floor(ph / 40)));
+  const L = Math.max(58, Math.max(...yticks.map((v) => ctx.measureText(fmtNum(v, yd)).width)) + 14);
+  const pw = W - L - R;
   const X = (v) => L + (v - x0) / (x1 - x0) * pw, Y = (v) => T + ph - (v - y0) / (y1 - y0) * ph;
   const xunit = t.header[xi][1];
   ctx.strokeStyle = line; ctx.fillStyle = muted; ctx.lineWidth = 1;
@@ -942,18 +1013,18 @@ function drawPlot() {
   for (const v of niceTicks(x0, x1, Math.max(2, Math.floor(pw / 90)))) {
     const px = Math.round(X(v)) + 0.5;
     ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke();
-    ctx.fillText(xunit ? fmtSI(v, xunit, 3) : fmtNum(v, 3), px, T + ph + 6);
+    ctx.fillText(xunit ? fmtSI(v, xunit, tickDigits(x0, x1, pw / 90)) : fmtNum(v, tickDigits(x0, x1, pw / 90)), px, T + ph + 6);
   }
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
-  for (const v of niceTicks(y0, y1, Math.max(2, Math.floor(ph / 40)))) {
+  for (const v of yticks) {
     const py = Math.round(Y(v)) + 0.5;
     ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke();
-    ctx.fillText(fmtNum(v, 3), L - 6, py);
+    ctx.fillText(fmtNum(v, yd), L - 6, py);
   }
   ctx.save();
   ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
   ys.forEach((j) => {
-    ctx.strokeStyle = SERIES[(j - 1) % SERIES.length];
+    ctx.strokeStyle = SERIES[(j - 1 + SERIES.length) % SERIES.length];
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     rows.forEach((r, k) => { const px = X(r[xi]), py = Y(r[j]); if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); });
@@ -963,6 +1034,21 @@ function drawPlot() {
     ctx.beginPath(); ctx.arc(X(last[xi]), Y(last[j]), 2.6, 0, 2 * Math.PI); ctx.fill();
   });
   ctx.restore();
+  // legend: the plotted columns with their units, top right inside the axes
+  ctx.font = "11px " + cssVar("--font-mono");
+  const leg = ys.map((j) => t.header[j][0] + (t.header[j][1] ? ` (${t.header[j][1]})` : ""));
+  const lw = Math.max(...leg.map((s) => ctx.measureText(s).width)) + 30;
+  if (plotHover === null && lw < pw * 0.7) {
+    const lx = L + pw - lw - 6, ly = T + 6;
+    ctx.fillStyle = cssVar("--panel"); ctx.globalAlpha = 0.85; ctx.fillRect(lx, ly, lw, leg.length * 15 + 6); ctx.globalAlpha = 1;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    leg.forEach((s, k) => {
+      const c = SERIES[(ys[k] - 1 + SERIES.length) % SERIES.length];
+      ctx.strokeStyle = c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lx + 6, ly + 10 + k * 15); ctx.lineTo(lx + 20, ly + 10 + k * 15); ctx.stroke();
+      ctx.fillStyle = fg; ctx.fillText(s, lx + 25, ly + 10 + k * 15);
+    });
+  }
   if (plotHover !== null && plotHover >= L && plotHover <= L + pw) {
     const xv = x0 + (plotHover - L) / pw * (x1 - x0);
     let best = 0, bd = Infinity;
@@ -977,7 +1063,7 @@ function drawPlot() {
     ctx.fillStyle = cssVar("--panel"); ctx.strokeStyle = line;
     ctx.fillRect(bx, T + 6, tw, lines.length * 15 + 8); ctx.strokeRect(bx + 0.5, T + 6.5, tw, lines.length * 15 + 8);
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    lines.forEach((s, k) => { ctx.fillStyle = k ? SERIES[(ys[k - 1] - 1) % SERIES.length] : fg; ctx.fillText(s, bx + 6, T + 11 + k * 15); });
+    lines.forEach((s, k) => { ctx.fillStyle = k ? SERIES[(ys[k - 1] - 1 + SERIES.length) % SERIES.length] : fg; ctx.fillText(s, bx + 6, T + 11 + k * 15); });
   }
 }
 plot.addEventListener("mousemove", (e) => { plotHover = e.clientX - plot.getBoundingClientRect().left; drawPlot(); });
@@ -990,38 +1076,107 @@ $("#btnCsv").addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------------ files
+// The Files page lists the output folder. Files and whole folders can be ticked and deleted; the output of the
+// run that is still going is protected (the server refuses it too).
+const fileSel = new Set();
+let filesShown = { files: [], dirs: [] };
+function updateDeleteBtn() {
+  const b = $("#btnDeleteSel");
+  b.disabled = !fileSel.size;
+  b.lastChild.textContent = fileSel.size ? `Delete (${fileSel.size})` : "Delete";
+}
+async function deletePaths(paths) {
+  paths = [...new Set(paths)].filter(Boolean);
+  if (!paths.length) return;
+  const head = paths.length === 1 ? `Delete ${paths[0]}?` : `Delete these ${paths.length} items?`;
+  const list = paths.slice(0, 14).map((p) => "  " + p + (filesShown.dirs.includes(p) ? "  (folder and everything in it)" : "")).join("\n") +
+    (paths.length > 14 ? `\n  … and ${paths.length - 14} more` : "");
+  if (!confirm(`${head}\n\nin ${workspace}\n\n${list}\n\nThis cannot be undone.`)) return;
+  try {
+    const r = await api("/api/delete", { body: { paths } });
+    toast(`Deleted ${r.deleted.length} item${r.deleted.length === 1 ? "" : "s"}`);
+    for (const d of r.deleted) logLine("// deleted " + d);
+    if (r.errors && r.errors.length) logLine("ERROR: could not delete " + r.errors.join("; "));
+  } catch (e) { toast(e.message, 5000); logLine("ERROR: " + e.message); }
+  fileSel.clear();
+  loadFiles();
+  refreshOutPath();
+}
+$("#btnDeleteSel").addEventListener("click", () => deletePaths([...fileSel]));
+
 async function loadFiles() {
   let r;
   try { r = await api("/api/files"); } catch (e) { return; }
+  workspace = r.workspace;
+  filesShown = r;
   $("#wsPath").textContent = r.workspace;
   $("#wsPath").title = r.workspace;
+  $("#btnOpenFolder").hidden = !nativeApi("open_folder");
   const list = $("#fileList");
   list.innerHTML = "";
-  if (!r.files.length) { list.innerHTML = '<p class="hint" style="padding:10px 14px">No files yet. Each run writes to &lt;name&gt;.out/ here; uploads (STL, PNG, CSV) land at the top level.</p>'; return; }
-  let dir = null;
+  const known = new Set(r.files.map((f) => f.path).concat(r.dirs));
+  for (const p of [...fileSel]) if (!known.has(p)) fileSel.delete(p);
+  updateDeleteBtn();
+  if (!r.files.length && !r.dirs.length) {
+    list.innerHTML = '<p class="hint" style="padding:10px 14px">Nothing here yet. Each run writes to &lt;name&gt;.out/ in this folder; uploads (STL, PNG, CSV) land at the top level.</p>';
+    return;
+  }
+  if (r.truncated) list.insertAdjacentHTML("beforeend", `<p class="note">Only the first ${r.files.length} files are listed: this folder holds many files. Choose a smaller output folder to see everything.</p>`);
+  const running = r.running;
+  const busy = (p) => running && (p === running || p.startsWith(running + "/"));
+  const groups = new Map([["", []]]);
+  for (const d of r.dirs) groups.set(d, []);
   for (const f of r.files) {
-    const parts = f.path.split("/");
-    const d = parts.length > 1 ? parts.slice(0, -1).join("/") : "workspace";
-    if (d !== dir) {
-      dir = d;
-      const h = document.createElement("div");
-      h.className = "dir"; h.textContent = d;
-      list.appendChild(h);
+    const i = f.path.lastIndexOf("/");
+    const d = i < 0 ? "" : f.path.slice(0, i);
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d).push(f);
+  }
+  const tick = (p, disabled) => {
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = fileSel.has(p); cb.disabled = !!disabled;
+    cb.title = disabled ? "In use by the running simulation" : "Select for deleting";
+    cb.setAttribute("aria-label", "Select " + p);
+    cb.addEventListener("change", () => { cb.checked ? fileSel.add(p) : fileSel.delete(p); updateDeleteBtn(); });
+    return cb;
+  };
+  const delBtn = (p, disabled, what) => {
+    const b = document.createElement("button");
+    b.className = "del"; b.type = "button"; b.disabled = !!disabled;
+    b.title = disabled ? "Stop the simulation before deleting its output" : `Delete this ${what}`;
+    b.setAttribute("aria-label", `Delete ${p}`);
+    b.innerHTML = '<svg><use href="#i-trash"/></svg>';
+    b.addEventListener("click", () => deletePaths([p]));
+    return b;
+  };
+  for (const [d, files] of groups) {
+    if (d === "" && !files.length) continue;
+    const h = document.createElement("div");
+    h.className = "dir";
+    if (d) h.appendChild(tick(d, busy(d)));
+    const name = document.createElement("span");
+    name.textContent = d || "top level"; name.title = d ? workspace + pathSep + d.replace(/\//g, pathSep) : workspace;
+    h.appendChild(name);
+    if (d && busy(d)) h.insertAdjacentHTML("beforeend", '<span class="live">running</span>');
+    if (d) h.appendChild(delBtn(d, busy(d), "folder and everything in it"));
+    list.appendChild(h);
+    for (const f of files) {
+      const row = document.createElement("div");
+      row.className = "f";
+      row.appendChild(tick(f.path, busy(f.path)));
+      const fn = document.createElement("span");
+      fn.className = "fn"; fn.textContent = f.path.split("/").pop(); fn.title = f.path;
+      const sz = document.createElement("span");
+      sz.className = "sz"; sz.textContent = f.size > 1e6 ? (f.size / 1e6).toFixed(1) + " MB" : (f.size / 1e3).toFixed(1) + " kB";
+      row.append(fn, sz);
+      const act = (label, title, fnc) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = title; b.addEventListener("click", fnc); row.appendChild(b); };
+      if (f.path.endsWith(".ovf")) act("view", "Show in the viewer; the other snapshots in this folder become frames you can play", () => ovfTo3D(f.path, r.files));
+      if (f.path.endsWith("table.txt")) act("plot", "Plot this table", () => plotFile(f.path));
+      if (/\.(mx3|py)$/.test(f.path)) act("open", "Open in the editor", () => openScriptFile(f.path));
+      act("save", "Save a copy somewhere else", () => downloadWorkspaceFile(f.path));
+      row.appendChild(delBtn(f.path, busy(f.path), "file"));
+      list.appendChild(row);
     }
-    const row = document.createElement("div");
-    row.className = "f";
-    const fn = document.createElement("span");
-    fn.className = "fn"; fn.textContent = parts[parts.length - 1]; fn.title = f.path;
-    const sz = document.createElement("span");
-    sz.className = "sz"; sz.textContent = f.size > 1e6 ? (f.size / 1e6).toFixed(1) + " MB" : (f.size / 1e3).toFixed(1) + " kB";
-    row.append(fn, sz);
-    const act = (label, title, fnc) => { const b = document.createElement("button"); b.textContent = label; b.title = title; b.addEventListener("click", fnc); row.appendChild(b); };
-    if (f.path.endsWith(".ovf")) act("view", "Show in the viewer", () => viewOvf(f.path));
-    if (f.path.endsWith("table.txt")) act("plot", "Plot this table", () => plotFile(f.path));
-    if (/\.(mx3|py)$/.test(f.path)) act("open", "Open in the editor", () => openScriptFile(f.path));
-    if (f.path.endsWith(".ovf")) act("3D", "Show in the 3D viewer; the other snapshots in this folder become frames", () => ovfTo3D(f.path, r.files));
-    act("save", "Save a copy", () => downloadWorkspaceFile(f.path));
-    list.appendChild(row);
   }
 }
 function ovfTo3D(path, files) {
@@ -1030,7 +1185,7 @@ function ovfTo3D(path, files) {
   const series = files.map((f) => f.path).filter((p) => p.startsWith(dir) && !p.slice(dir.length).includes("/") &&
     p.endsWith(".ovf") && p.slice(dir.length).replace(/\d+\.ovf$/, "") === base)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  LAYOUT.open("view3d");
+  LAYOUT.open("view");
   $("#v3source").value = "files";
   VIEW3D.addWorkspaceFiles(series.length ? series : [path], api);
   const i = series.indexOf(path);
@@ -1042,16 +1197,6 @@ $("#fileUpload").addEventListener("change", async (e) => {
   e.target.value = "";
   loadFiles();
 });
-async function viewOvf(path) {
-  try {
-    const buf = await api("/api/ovf?path=" + encodeURIComponent(path), { binary: true });
-    lastField = parseField(buf);
-    viewSource = "file";
-    $("#chkAuto").checked = false;
-    if (page === "geometry") switchTab("files");
-    drawField();
-  } catch (e) { logLine("ERROR: " + e.message); }
-}
 async function plotFile(path) {
   const txt = await api("/api/file?path=" + encodeURIComponent(path), { text: true });
   const lines = txt.split("\n");
@@ -1079,6 +1224,7 @@ $("#btnSaveLog").addEventListener("click", () => {
 
 // ------------------------------------------------------------------ 3D viewer controls
 function v3info() {
+  if (geometryMode()) return;
   const i = VIEW3D.info();
   $("#v3empty").hidden = !!i;
   const fb = $("#v3frames");
@@ -1128,8 +1274,13 @@ $("#v3source").addEventListener("change", () => {
   else if (VIEW3D.live) { VIEW3D.status("Open .ovf files with the OVF… button, drop them here, or use 3D next to a file on the Files page."); }
 });
 $("#v3quantity").addEventListener("change", () => { $("#v3source").value = "live"; load3dLive(); });
-$("#v3refresh").addEventListener("click", () => { if ($("#v3source").value === "live") load3dLive(); else VIEW3D.showFrame(VIEW3D.info() ? VIEW3D.info().frame : 0); });
-$("#v3png").addEventListener("click", () => VIEW3D.png((b) => downloadBlob(b, "view3d.png")));
+$("#v3refresh").addEventListener("click", () => {
+  if (geometryMode()) { geo3.key = ""; GEOM.requestPreview(Number($("#layer").value)); if (geoView === "3d") requestGeom3d(); return; }
+  if ($("#v3source").value === "live") load3dLive(); else VIEW3D.showFrame(VIEW3D.info() ? VIEW3D.info().frame : 0); });
+$("#v3png").addEventListener("click", () => {
+  if (geoEdit2d()) view.toBlob((b) => b && downloadBlob(b, "geometry.png"));
+  else VIEW3D.png((b) => downloadBlob(b, geometryMode() ? "geometry3d.png" : "view3d.png"));
+});
 $("#v3play").addEventListener("click", () => VIEW3D.play());
 $("#v3prev").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame - 1); });
 $("#v3next").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame + 1); });
@@ -1163,6 +1314,11 @@ async function init() {
     groups[g].appendChild(o);
   }
   settings = inf.settings || {};
+  $("#splashVer").textContent = "version " + inf.version;
+  workspace = inf.workspace || ""; pathSep = inf.sep || pathSep;
+  folderChosen = inf.folder_chosen !== false;
+  if (settings.geo_view === "3d" || settings.geo_view === "2d") geoView = settings.geo_view;
+  refreshOutPath();
   fillDevices(inf);
   if (settings.layout) LAYOUT.restore(settings.layout);
   ASSIST.init({
@@ -1275,6 +1431,7 @@ const UPD = (() => {
 
 updateHints();
 init().then(() => {
+  setTimeout(hideSplash, Math.max(250, 1200 - performance.now()));   // long enough to read, never in the way
   api("/api/info").then((i) => { $("#verLine").textContent = `mumax Studio ${i.version}`; }).catch(() => {});
   setTimeout(() => UPD.check(false), 2500);
 });
