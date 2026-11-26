@@ -89,7 +89,7 @@ iscc packaging/installer.iss     # Windows installer, needs Inno Setup 6
 ```
 
 PyInstaller builds for the OS it runs on. The workflow in `.github/workflows/release.yml` builds the Windows, Linux
-and macOS packages on GitHub's machines. Push a tag (`git tag v0.2.1 && git push origin v0.2.1`) and the installers
+and macOS packages on GitHub's machines. Push a tag (`git tag v0.2.2 && git push origin v0.2.2`) and the installers
 are attached to a new release a few minutes later.
 
 ## Using the GUI
