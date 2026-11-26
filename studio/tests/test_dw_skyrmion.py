@@ -129,7 +129,7 @@ Relax()
 """
 
 
-def radial_reference(A, K, D, rmax=50e-9, h=0.02e-9):
+def radial_reference(A, K, D, rmax=50e-9, h=0.02e-9, r0=10e-9):
     """Isolated Neel skyrmion: minimise E[theta] = 2 pi t int [A(theta'^2 + sin^2/r^2) + D(theta' + sin cos / r)
     + K sin^2] r dr with theta(0) = pi, theta(rmax) = 0 (finite differences on a staggered grid)."""
     from scipy.optimize import minimize
@@ -149,10 +149,10 @@ def radial_reference(A, K, D, rmax=50e-9, h=0.02e-9):
         g = np.zeros(N + 1)
         g[:-1] += -de_dd / h + de_dt / 2
         g[1:] += de_dd / h + de_dt / 2
-        return e.sum(), g[1:-1]
+        return e.sum() / 1e-20, g[1:-1] / 1e-20     # energies are ~1e-20 J: rescale for the optimiser
 
-    th0 = 2 * np.arctan(np.exp(-(r[1:-1] - 10e-9) / math.sqrt(A / K)))
-    res = minimize(energy, th0, jac=True, method="L-BFGS-B", options={"maxiter": 20000, "gtol": 1e-14})
+    th0 = 2 * np.arctan(np.exp(-(r[1:-1] - r0) / math.sqrt(A / K)))
+    res = minimize(energy, th0, jac=True, method="L-BFGS-B", options={"maxiter": 200000, "maxfun": 400000, "gtol": 1e-12, "ftol": 1e-16})
     th = np.concatenate(([math.pi], res.x, [0.0]))
     i = np.where(th < math.pi / 2)[0][0]
     return r[i - 1] + (th[i - 1] - math.pi / 2) / (th[i - 1] - th[i]) * h
