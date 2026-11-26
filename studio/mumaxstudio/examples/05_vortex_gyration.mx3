@@ -1,0 +1,20 @@
+// Vortex core gyration in a permalloy disk after a field pulse.
+
+SetGridSize(64, 64, 1)
+SetCellSize(4e-9, 4e-9, 20e-9)
+SetGeom(Circle(256e-9))
+
+Msat  = 860e3
+Aex   = 13e-12
+alpha = 0.01
+
+m = Vortex(1, 1)
+Relax()
+Save(m)
+
+// 100 ps in-plane field pulse
+B_ext = vector(5e-3 * heaviside(100e-12 - t), 0, 0)
+TableAdd(E_total)
+TableAutoSave(10e-12)
+AutoSave(m, 100e-12)
+Run(3e-9)

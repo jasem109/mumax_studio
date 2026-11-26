@@ -1,0 +1,22 @@
+// Current-driven (Zhang-Li) domain-wall motion in a perpendicular nanostrip.
+
+SetGridSize(256, 32, 1)
+SetCellSize(2e-9, 2e-9, 1e-9)
+
+Msat  = 600e3
+Aex   = 10e-12
+Ku1   = 0.6e6
+anisU = vector(0, 0, 1)
+alpha = 0.02
+xi    = 0.04
+Pol   = 1
+
+m = TwoDomain(0, 0, 1,  1, 1, 0,  0, 0, -1)   // up | Bloch wall | down
+Relax()
+
+J = vector(1e12, 0, 0)        // current along +x: u = muB*P*J/(e*Msat) ~ 100 m/s
+TableAdd(ext_dwpos)
+TableAutoSave(10e-12)
+AutoSave(m, 200e-12)
+Run(1e-9)
+print("wall position:", ext_dwpos.get(), "m")

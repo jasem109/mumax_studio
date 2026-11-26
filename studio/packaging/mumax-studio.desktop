@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=mumax Studio
+Comment=Micromagnetic simulations (mumax3-compatible, STT and SOT)
+Exec=mumax-studio gui %f
+Icon=mumax-studio
+Terminal=false
+Categories=Science;Physics;Education;
+MimeType=text/x-mumax3;

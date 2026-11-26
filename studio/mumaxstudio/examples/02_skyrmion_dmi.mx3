@@ -1,0 +1,25 @@
+// Neel skyrmion in a Co/Pt-like nanodisk with interfacial DMI and PMA.
+
+SetGridSize(64, 64, 1)
+SetCellSize(2e-9, 2e-9, 0.6e-9)
+SetGeom(Circle(120e-9))
+
+Msat  = 580e3
+Aex   = 15e-12
+Ku1   = 0.8e6
+anisU = vector(0, 0, 1)
+Dind  = 3.0e-3
+alpha = 0.3
+
+m = NeelSkyrmion(1, -1)   // core pointing down, background up
+Relax()
+print("skyrmion number Q =", ext_topologicalcharge.get())
+Save(m)
+
+// breathe the skyrmion with a small out-of-plane field
+alpha = 0.05
+B_ext = vector(0, 0, 0.02 * sin(2*pi*2e9*t))
+TableAdd(ext_topologicalcharge)
+TableAdd(B_ext)
+TableAutoSave(10e-12)
+Run(1e-9)

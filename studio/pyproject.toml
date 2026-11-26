@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mumax-studio"
+version = "0.2.0"
+description = "Micromagnetic simulation studio: a Python (NumPy/CuPy) port of the mumax3 STT-SOT engine with a browser GUI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.8",      # multithreaded FFT on CPU (optional at runtime, strongly recommended)
+    "pillow>=9",       # PNG snapshots and ImageShape()
+]
+
+[project.urls]
+Homepage = "https://majasem.com/mumaxUI"
+
+[project.optional-dependencies]
+cuda12 = ["cupy-cuda12x>=12"]     # NVIDIA GPUs, CUDA 12 driver
+cuda11 = ["cupy-cuda11x>=12"]     # NVIDIA GPUs, CUDA 11 driver
+native = ["pywebview>=4"]         # open the GUI in its own desktop window
+
+[project.scripts]
+mumax-studio = "mumaxstudio.__main__:main"
+
+[tool.setuptools]
+packages = ["mumaxstudio"]
+
+[tool.setuptools.package-data]
+mumaxstudio = ["web/*", "examples/*", "examples/mumax3_official/*"]
