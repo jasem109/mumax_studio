@@ -1,0 +1,35 @@
+// Spin-orbit-torque (spin Hall) switching of a perpendicular CoFeB dot.
+// Uses the STT-SOT fork parameters: JSOT, SPINHALL, HFLoverHDL, SOThickness, SOTFixedLayer.
+
+SetGridSize(64, 64, 1)
+SetCellSize(2e-9, 2e-9, 1e-9)
+SetGeom(Circle(120e-9))
+
+Msat  = 1.1e6
+Aex   = 15e-12
+Ku1   = 1.0e6
+anisU = vector(0, 0, 1)
+alpha = 0.05
+
+m = Uniform(0.05, 0, 1)
+Relax()
+
+// in-plane bias field along the current direction breaks the symmetry
+B_ext = vector(30e-3, 0, 0)
+
+SPINHALL      = 0.3                // spin Hall angle
+HFLoverHDL    = 0.2                // field-like / damping-like ratio
+SOThickness   = 1e-9               // free layer thickness (0 = mesh thickness)
+SOTFixedLayer = vector(0, 1, 0)    // spin polarization sigma (current along x)
+
+// 1 ns current pulse of 6e12 A/m2 (the z-component of JSOT is used).
+// Expected: m switches from +z to -z. Reversing either the current or the bias field
+// keeps m up (deterministic SOT switching depends on the sign of J*Bx).
+JSOT = vector(0, 0, 6e12 * heaviside(1e-9 - t))
+
+TableAdd(SOTorque)
+TableAdd(E_total)
+TableAutoSave(5e-12)
+AutoSave(m, 100e-12)
+Run(2.5e-9)
+print("final <m> =", m.average())

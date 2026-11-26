@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mumax Studio</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-setup" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-geom" viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><path d="M2 12h3l2-6 3 12 3-9 2 6 2-3h5"/></symbol>
+    <symbol id="i-script" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="icon.svg" alt="" width="26" height="26">
+    <span class="brand-name">mumax <em>Studio</em></span>
+  </div>
+  <label class="jobname" title="Simulation name: outputs go to &lt;name&gt;.out in the workspace">
+    <span class="sr-only">Simulation name</span>
+    <input id="jobName" value="untitled" spellcheck="false" autocomplete="off">
+  </label>
+  <div class="transport" role="group" aria-label="Simulation control">
+    <button id="btnRun" class="tbtn run" title="Run the script (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Run</span></button>
+    <button id="btnPause" class="tbtn" title="Pause / resume" disabled><svg><use href="#i-pause"/></svg><span>Pause</span></button>
+    <button id="btnStop" class="tbtn stop" title="Stop" disabled><svg><use href="#i-stop"/></svg><span>Stop</span></button>
+    <span id="statePill" class="pill idle">idle</span>
+  </div>
+  <dl class="readouts" id="stats">
+    <div><dt>t</dt><dd id="stT">–</dd></div>
+    <div><dt>step</dt><dd id="stStep">–</dd></div>
+    <div><dt>dt</dt><dd id="stDt">–</dd></div>
+    <div><dt>max τ</dt><dd id="stTorque">–</dd></div>
+    <div><dt>speed</dt><dd id="stSpeed">–</dd></div>
+  </dl>
+  <div class="device">
+    <select id="selBackend" title="Compute device" aria-label="Compute device">
+      <option value="auto">Auto device</option>
+      <option value="cpu">CPU</option>
+      <option value="gpu">GPU (CUDA / ROCm)</option>
+    </select>
+    <select id="selPrecision" title="Floating-point precision" aria-label="Precision">
+      <option value="single">float32</option><option value="double">float64</option>
+    </select>
+    <span id="deviceInfo" class="deviceinfo"></span>
+    <button class="iconbtn" id="btnTheme" title="Light / dark" aria-label="Toggle dark theme"><svg><use href="#i-theme"/></svg></button>
+  </div>
+</header>
+
+<main class="layout">
+  <nav class="rail" aria-label="Sections">
+    <button class="railbtn active" data-tab="setup" title="Material, initial state, run"><svg><use href="#i-setup"/></svg><span>Setup</span></button>
+    <button class="railbtn" data-tab="geometry" title="Mesh and geometry builder"><svg><use href="#i-geom"/></svg><span>Geometry</span></button>
+    <button class="railbtn" data-tab="drive" title="Fields, currents and pulses"><svg><use href="#i-drive"/></svg><span>Drive</span></button>
+    <button class="railbtn" data-tab="script" title="Script editor"><svg><use href="#i-script"/></svg><span>Script</span></button>
+    <button class="railbtn" data-tab="files" title="Workspace files"><svg><use href="#i-files"/></svg><span>Files</span></button>
+    <button class="railbtn" data-tab="help" title="Reference"><svg><use href="#i-help"/></svg><span>Help</span></button>
+  </nav>
+
+  <section class="panel side" aria-label="Simulation setup">
+    <!-- ======================= Setup ======================= -->
+    <div class="page active" id="page-setup">
+      <header class="pagehead"><h2>Setup</h2><p>Material, starting state and what to record. Mesh and shape are under <a href="#" data-goto="geometry">Geometry</a>, fields and currents under <a href="#" data-goto="drive">Drive</a>.</p></header>
+      <form id="setupForm" autocomplete="off" class="form">
+        <section class="group">
+          <h3>Material</h3>
+          <label class="row">Preset
+            <select name="preset" id="preset">
+              <option value="py">Permalloy Ni₈₀Fe₂₀</option>
+              <option value="cofeb_ip">CoFeB, in-plane</option>
+              <option value="cofeb_pma">CoFeB, perpendicular</option>
+              <option value="copt">Co/Pt with DMI (skyrmions)</option>
+              <option value="yig">YIG</option>
+              <option value="mn3sn">Mn₃Sn-like weak ferromagnet</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div class="grid3">
+            <label>M<sub>sat</sub><span class="u"><input name="msat" type="number" step="any" value="800"><i>kA/m</i></span></label>
+            <label>A<sub>ex</sub><span class="u"><input name="aex" type="number" step="any" value="13"><i>pJ/m</i></span></label>
+            <label>α<span class="u"><input name="alpha" type="number" step="any" value="0.02"><i></i></span></label>
+            <label>K<sub>u1</sub><span class="u"><input name="ku1" type="number" step="any" value="0"><i>MJ/m³</i></span></label>
+            <label>D<sub>ind</sub><span class="u"><input name="dind" type="number" step="any" value="0"><i>mJ/m²</i></span></label>
+            <label>D<sub>bulk</sub><span class="u"><input name="dbulk" type="number" step="any" value="0"><i>mJ/m²</i></span></label>
+            <label>anisU x<input name="ux" type="number" step="any" value="0"></label>
+            <label>anisU y<input name="uy" type="number" step="any" value="0"></label>
+            <label>anisU z<input name="uz" type="number" step="any" value="1"></label>
+          </div>
+          <details class="sub"><summary>Per-region values <span class="count" id="regCount"></span></summary>
+            <p class="hint">Regions come from shapes in the Geometry builder (their “region” number). Values here override the material above inside that region.</p>
+            <div id="regionRows" class="regionrows"></div>
+            <button type="button" class="btn small" id="btnAddRegionRow"><svg><use href="#i-plus"/></svg>Add value</button>
+          </details>
+        </section>
+
+        <section class="group">
+          <h3>Initial magnetization</h3>
+          <div class="grid3">
+            <label class="span3">State
+              <select name="init">
+                <option value="uniform">Uniform</option>
+                <option value="random">Random</option>
+                <option value="vortex">Vortex</option>
+                <option value="neel">Néel skyrmion</option>
+                <option value="bloch">Bloch skyrmion</option>
+                <option value="twodomain">Two domains, up | down</option>
+                <option value="twodomain_ip">Two domains, +x | −x (Néel wall)</option>
+                <option value="file">Load from .ovf file</option>
+              </select>
+            </label>
+            <label data-init="uniform">m<sub>x</sub><input name="mx" type="number" step="any" value="1"></label>
+            <label data-init="uniform">m<sub>y</sub><input name="my" type="number" step="any" value="0.1"></label>
+            <label data-init="uniform">m<sub>z</sub><input name="mz" type="number" step="any" value="0"></label>
+            <label data-init="vortex">circulation<select name="circ"><option>1</option><option>-1</option></select></label>
+            <label data-init="vortex neel bloch">polarity<select name="pol"><option>1</option><option selected>-1</option></select></label>
+            <label data-init="neel bloch">charge<select name="charge"><option>1</option><option>-1</option></select></label>
+            <label data-init="neel bloch">scale<input name="skscale" type="number" step="any" value="1" title="stretch the core in x and y"></label>
+            <label data-init="file" class="span3">file in workspace<input name="mfile" placeholder="m000000.ovf"></label>
+          </div>
+          <label class="check"><input type="checkbox" name="relax" checked> Relax first, before fields and currents are switched on</label>
+        </section>
+
+        <section class="group">
+          <h3>Run and record</h3>
+          <div class="grid3">
+            <label>run time<span class="u"><input name="trun" type="number" step="any" value="1"><i>ns</i></span></label>
+            <label>table every<span class="u"><input name="ttab" type="number" step="any" value="10"><i>ps</i></span></label>
+            <label>save m every<span class="u"><input name="tsave" type="number" step="any" value="0" title="0 = never"><i>ps</i></span></label>
+            <label class="span2">Solver
+              <select name="solver">
+                <option value="5">RK45 Dormand–Prince (adaptive)</option>
+                <option value="3">RK23 Bogacki–Shampine</option>
+                <option value="4">RK4 (fixed step)</option>
+                <option value="2">Heun (with temperature)</option>
+                <option value="1">Euler</option>
+              </select>
+            </label>
+            <label>MaxErr<input name="maxerr" type="number" step="any" value="1e-5"></label>
+            <label>T<span class="u"><input name="temp" type="number" step="any" value="0"><i>K</i></span></label>
+            <label>fixed dt<span class="u"><input name="fixdt" type="number" step="any" value="0" title="0 = adaptive"><i>fs</i></span></label>
+            <label>seed<input name="seed" type="number" value="0"></label>
+          </div>
+          <fieldset class="checks"><legend>Extra table columns</legend>
+            <label class="check"><input type="checkbox" name="t_etot" checked> E_total</label>
+            <label class="check"><input type="checkbox" name="t_q"> topological charge</label>
+            <label class="check"><input type="checkbox" name="t_bext"> B_ext</label>
+            <label class="check"><input type="checkbox" name="t_maxt"> maxTorque</label>
+            <label class="check"><input type="checkbox" name="t_dw"> DW position</label>
+          </fieldset>
+        </section>
+      </form>
+    </div>
+
+    <!-- ======================= Geometry builder ======================= -->
+    <div class="page" id="page-geometry">
+      <header class="pagehead"><h2>Geometry</h2><p>Stack shapes like a modeller: each one adds to, cuts from, intersects or toggles the magnet. Drag in the preview to move the selected shape.</p></header>
+      <section class="group">
+        <h3>Mesh</h3>
+        <div class="grid4">
+          <label>N<sub>x</sub><input id="nx" type="number" min="1" value="128"></label>
+          <label>N<sub>y</sub><input id="ny" type="number" min="1" value="64"></label>
+          <label>N<sub>z</sub><input id="nz" type="number" min="1" value="1"></label>
+          <label>PBC<input id="pbc" placeholder="0,0,0" value="0,0,0" title="periodic repetitions x,y,z"></label>
+          <label>cell x<span class="u"><input id="cx" type="number" step="any" value="4"><i>nm</i></span></label>
+          <label>cell y<span class="u"><input id="cy" type="number" step="any" value="4"><i>nm</i></span></label>
+          <label>cell z<span class="u"><input id="cz" type="number" step="any" value="4"><i>nm</i></span></label>
+          <label>edge smooth<input id="edgesmooth" type="number" min="0" max="16" value="0" title="EdgeSmooth: n³ samples per edge cell, 0 = staircase"></label>
+        </div>
+        <p class="hint" id="meshHint"></p>
+      </section>
+      <section class="group">
+        <div class="grouphead"><h3>Shapes</h3>
+          <div class="addmenu">
+            <select id="addShape" aria-label="Add a shape">
+              <option value="">Add shape…</option>
+              <optgroup label="2D, extruded through the film">
+                <option value="rect">Rectangle</option><option value="circle">Disk</option><option value="ellipse">Ellipse</option>
+                <option value="ring">Ring</option><option value="regpoly">Regular polygon</option><option value="polygon">Polygon (vertices)</option>
+              </optgroup>
+              <optgroup label="3D">
+                <option value="cuboid">Cuboid</option><option value="cylinder">Cylinder</option><option value="ellipsoid">Ellipsoid</option>
+                <option value="sphere">Sphere</option><option value="cone">Cone</option><option value="torus">Torus</option>
+                <option value="layers">Layers (z index range)</option>
+              </optgroup>
+              <optgroup label="Imported">
+                <option value="stl">3D model (.stl from Blender, FreeCAD…)</option><option value="image">Image mask (.png)</option>
+              </optgroup>
+              <optgroup label="Code">
+                <option value="custom">Custom inside(x, y, z)</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+        <ol class="shapelist" id="shapeList"></ol>
+        <p class="hint" id="shapeEmpty">No shapes: the whole box is magnetic. Add a shape to start building.</p>
+        <div class="shapeedit" id="shapeEdit" hidden></div>
+        <p class="hint keys">In the preview: drag to move · <kbd>Shift</kbd>+wheel rotates · <kbd>Ctrl</kbd>+wheel scales · <kbd>Shift</kbd>+<kbd>D</kbd> duplicates · <kbd>Del</kbd> removes · arrow keys nudge one cell.</p>
+      </section>
+    </div>
+
+    <!-- ======================= Drive (excitations) ======================= -->
+    <div class="page" id="page-drive">
+      <header class="pagehead"><h2>Drive</h2><p>Fields and currents as a sum of terms: amplitude × waveform(t) × spatial profile. The plot shows every waveform over the run time.</p></header>
+      <div id="driveTargets"></div>
+      <section class="group">
+        <h3>Waveform preview</h3>
+        <div class="wavewrap"><canvas id="wavePlot" height="150"></canvas></div>
+        <div class="waveopts">
+          <label class="check small"><input type="checkbox" id="waveSpec"> spectrum (|FFT|)</label>
+          <span class="hint" id="waveInfo"></span>
+        </div>
+      </section>
+      <section class="group">
+        <h3>Custom field term <span class="tag">Python</span></h3>
+        <p class="hint">A function of position (m) and time (s) returning (B<sub>x</sub>, B<sub>y</sub>, B<sub>z</sub>) in tesla, vectorised with NumPy. Using it turns the generated script into Python.</p>
+        <label class="check"><input type="checkbox" id="customOn"> add this term to B<sub>eff</sub></label>
+        <textarea id="customField" class="code" rows="7" spellcheck="false">def field(x, y, z, t):
+    # Oersted-like field of a wire along y at x = 0, 50 nm below the film
+    r2 = x**2 + (z + 50e-9)**2
+    B = 2e-7 * 5e-3 * Gaussian(t, 0.5e-9, 0.2e-9) / r2   # mu0 I / (2 pi r), I = 5 mA
+    return (-B * (z + 50e-9), 0 * y, B * x)</textarea>
+      </section>
+    </div>
+
+    <!-- ======================= Script ======================= -->
+    <div class="page" id="page-script">
+      <div class="toolbar">
+        <select id="selLang" title="Script language"><option value="mx3">mumax3 .mx3</option><option value="py">Python .py</option></select>
+        <select id="selExample" title="Load an example"><option value="">Examples…</option></select>
+        <label class="btn small filebtn">Open…<input type="file" id="fileOpen" accept=".mx3,.py,.txt"></label>
+        <button class="btn small" id="btnDownloadScript" title="Download the script">Save</button>
+        <button class="btn small primary" id="btnGenerate" title="Write the script from Setup, Geometry and Drive">Generate from forms</button>
+      </div>
+      <div class="editor" id="editorWrap">
+        <pre class="gutter" id="gutter">1</pre>
+        <div class="codearea">
+          <pre class="hl" id="hl" aria-hidden="true"></pre>
+          <textarea id="editor" spellcheck="false" wrap="off" aria-label="Script"></textarea>
+        </div>
+      </div>
+      <div class="errorbar" id="errorBar" hidden></div>
+    </div>
+
+    <!-- ======================= Files ======================= -->
+    <div class="page" id="page-files">
+      <div class="toolbar">
+        <button class="btn small" id="btnRefreshFiles"><svg><use href="#i-refresh"/></svg>Refresh</button>
+        <label class="btn small filebtn">Upload…<input type="file" id="fileUpload" multiple accept=".stl,.png,.jpg,.csv,.txt,.dat,.ovf,.mx3,.py,.npy"></label>
+        <span class="muted small path" id="wsPath"></span>
+      </div>
+      <div id="fileList" class="filelist"></div>
+    </div>
+
+    <!-- ======================= Help ======================= -->
+    <div class="page" id="page-help">
+      <div class="help">
+        <h3>Workflow</h3>
+        <ol>
+          <li><b>Geometry</b>: set the mesh and build the magnet from shapes, imported STL models, images or your own <code>inside(x, y, z)</code> code.</li>
+          <li><b>Setup</b>: material, initial state, what to record. <b>Drive</b>: fields and currents with any pulse shape.</li>
+          <li>Press <b>Run</b>. The script is generated (see the <b>Script</b> page) and runs on the chosen device. Ctrl+Enter runs whatever is in the editor.</li>
+          <li>While it runs, type commands in the console, e.g. <code>B_ext = vector(0, 0, 0.1)</code>, <code>Save(m)</code>, <code>Run(1e-9)</code>.</li>
+        </ol>
+        <h3>Pulse and waveform functions</h3>
+        <table class="ref">
+          <tr><td><code>Gaussian(t, t0, fwhm)</code></td><td>unit-height Gaussian</td></tr>
+          <tr><td><code>Pulse(t, t0, width)</code></td><td>rectangular</td></tr>
+          <tr><td><code>Trapezoid(t, t0, rise, flat, fall)</code></td><td>linear edges</td></tr>
+          <tr><td><code>SincPulse(t, t0, fc)</code></td><td>flat spectrum up to f<sub>c</sub></td></tr>
+          <tr><td><code>Chirp(t, f0, f1, T)</code></td><td>linear frequency sweep</td></tr>
+          <tr><td><code>SquareWave(t, f, duty)</code>, <code>TriangleWave</code>, <code>SawtoothWave</code></td><td>periodic</td></tr>
+          <tr><td><code>PulseTrain(t, t0, width, period, n)</code></td><td>repeated pulses</td></tr>
+          <tr><td><code>GaussianWavePacket(t, t0, fwhm, f)</code></td><td>microwave burst</td></tr>
+          <tr><td><code>Waveform(ts, vs)</code>, <code>LoadWaveform("w.csv")</code></td><td>arbitrary, piecewise linear</td></tr>
+        </table>
+        <h3>Spatial profiles and custom fields</h3>
+        <table class="ref">
+          <tr><td><code>B_ext.Add(ShapeMask(shape, vector(0,0,1)), A*f(t))</code></td><td>field only inside a shape</td></tr>
+          <tr><td><code>GaussianSpot(x0, y0, fwhm, v)</code>, <code>StripLine(x0, w, v)</code></td><td>focused spot, antenna strip</td></tr>
+          <tr><td><code>AddFieldTerm(q)</code></td><td>any vector quantity, e.g. <code>Mul(Const(0.1), m)</code></td></tr>
+          <tr><td><code>AddFieldTerm(fn)</code> (Python)</td><td><code>fn(x, y, z[, t]) → (Bx, By, Bz)</code></td></tr>
+        </table>
+        <h3>Shapes</h3>
+        <p>All mumax3 shapes and <code>Transl</code>, <code>RotX/Y/Z</code>, <code>Scale</code>, <code>Repeat</code>, <code>Add</code>, <code>Sub</code>, <code>Intersect</code>, <code>Xor</code>, <code>Inverse</code>, plus
+          <code>Polygon(xs, ys)</code>, <code>RegularPolygon(n, d)</code>, <code>Ring(do, di)</code>, <code>Sphere(d)</code>, <code>Torus(D, d)</code>,
+          <code>STLShape("part.stl", 1e-9)</code> and, in Python, <code>SetGeom(lambda x, y, z: ...)</code>. <code>EdgeSmooth = 8</code> smooths edges as in mumax3.</p>
+        <h3>Spin–orbit torque (this fork)</h3>
+        <table class="ref">
+          <tr><td><code>JSOT</code></td><td>current density (A/m²); z-component used, a scalar works</td></tr>
+          <tr><td><code>SPINHALL</code>, <code>HFLoverHDL</code></td><td>spin Hall angle, field-like/damping-like ratio</td></tr>
+          <tr><td><code>SOThickness</code>, <code>SOTFixedLayer</code></td><td>thickness (0 = mesh), polarization σ</td></tr>
+        </table>
+        <h3>Devices</h3>
+        <p>The CPU (NumPy + SciPy FFT) always works. Install CuPy for your GPU, <code>pip install cupy-cuda12x</code> (NVIDIA) or <code>cupy-rocm-*</code> (AMD, Linux), then choose <b>GPU</b> or <b>Auto</b>.</p>
+        <h3>Colours</h3>
+        <p>Vectors use the mumax3 colour wheel: hue = in-plane direction, white = +z, black = −z.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= viewer ======================= -->
+  <section class="panel viewer" aria-label="Field viewer">
+    <div class="toolbar">
+      <span class="vtitle" id="viewTitle">Magnetization</span>
+      <select id="selQuantity" title="Quantity"><option value="m">m</option></select>
+      <select id="selComp" title="Component">
+        <option value="v">colour wheel</option><option value="0">x</option><option value="1">y</option><option value="2">z</option>
+      </select>
+      <label class="small layerctl">z <input type="range" id="layer" min="0" max="0" value="0"><output id="layerVal">0</output></label>
+      <label class="check small"><input type="checkbox" id="chkArrows" checked> arrows</label>
+      <label class="check small"><input type="checkbox" id="chkAuto" checked> live</label>
+      <span class="spacer"></span>
+      <button class="iconbtn" id="btnRefreshView" title="Refresh now" aria-label="Refresh"><svg><use href="#i-refresh"/></svg></button>
+      <button class="iconbtn" id="btnSavePng" title="Save image" aria-label="Save image"><svg><use href="#i-image"/></svg></button>
+    </div>
+    <div class="canvaswrap" id="viewWrap" tabindex="0">
+      <canvas id="view"></canvas>
+      <div class="legend" id="legend"><canvas id="legendCanvas" width="120" height="120"></canvas><div id="legendText"></div></div>
+      <div class="empty" id="viewEmpty"><p><b>Nothing to show yet.</b><br>Build a geometry or press <b>Run</b>.</p></div>
+    </div>
+    <div class="infoline small" id="viewInfo">&nbsp;</div>
+  </section>
+
+  <!-- ======================= plot ======================= -->
+  <section class="panel plot" aria-label="Table plot">
+    <div class="toolbar">
+      <span class="vtitle">Table</span>
+      <label class="small">x <select id="selX"></select></label>
+      <div id="yCols" class="ycols small"></div>
+      <span class="spacer"></span>
+      <button class="btn small" id="btnCsv" title="Download the table as CSV">CSV</button>
+    </div>
+    <div class="canvaswrap"><canvas id="plot"></canvas></div>
+  </section>
+
+  <!-- ======================= console ======================= -->
+  <section class="panel console" aria-label="Console">
+    <div class="log" id="log" role="log" aria-live="polite"></div>
+    <div class="cmdline">
+      <span class="prompt">›</span>
+      <input id="cmd" placeholder="B_ext = vector(0, 0, 0.1)   ·   Save(m)   ·   Run(1e-9)        ↑ ↓ history" spellcheck="false" aria-label="Command">
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="tokenModal" hidden>
+  <div class="card">
+    <h3>Session token needed</h3>
+    <p>Open the link printed in the terminal, or paste the token here.</p>
+    <input id="tokenInput" placeholder="token">
+    <button class="btn primary" id="tokenOk">Connect</button>
+  </div>
+</div>
+<script src="waveforms.js"></script>
+<script src="geometry.js"></script>
+<script src="drive.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

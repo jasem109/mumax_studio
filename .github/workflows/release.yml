@@ -1,0 +1,110 @@
+# The app lives in studio/ (the Go/CUDA mumax3 fork it ports is at the repo root).
+# Builds the desktop app for Windows, Linux and macOS and attaches the installers to a GitHub Release.
+# Trigger: push a tag like v0.2.0  (git tag v0.2.0 && git push origin v0.2.0), or run it by hand from the Actions tab.
+# Every package bundles Python, NumPy, SciPy and Pillow, so users download one file and install nothing else.
+# Asset names carry no version, so https://github.com/<owner>/<repo>/releases/latest/download/<name> always points
+# at the newest build (the website's download buttons use these addresses).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: studio } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, edition: "" }
+          - { os: windows-latest, edition: "-nvidia" }
+          - { os: ubuntu-22.04, edition: "" }
+          - { os: ubuntu-22.04, edition: "-nvidia" }
+          - { os: macos-14, edition: "" }
+    runs-on: ${{ matrix.os }}
+    defaults: { run: { working-directory: studio } }
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          pip install -r requirements.txt pyinstaller
+          if [ "$RUNNER_OS" != "Linux" ]; then pip install pywebview; fi
+          if [ "${{ matrix.edition }}" = "-nvidia" ]; then pip install cupy-cuda12x; fi
+      - name: Build app
+        shell: bash
+        run: python build_exe.py ${{ matrix.edition == '-nvidia' && '--gpu' || '' }}
+      - name: Smoke test
+        if: runner.os == 'Linux'
+        run: ./dist/mumax-studio/mumax-studio info
+
+      - name: Package (Windows installer + portable zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = "$env:VERSION".TrimStart("v"); if ($v -notmatch "^[0-9]+(\.[0-9]+){0,3}$") { $v = "0.0.0" }
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$v" "/DEdition=${{ matrix.edition }}" packaging\installer.iss
+          Compress-Archive -Path dist\mumax-studio -DestinationPath "dist\mumax-studio-windows${{ matrix.edition }}-portable.zip"
+      - name: Package (Linux tarball)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          d="mumax-studio-linux${{ matrix.edition }}"
+          mkdir -p "pkg/$d"
+          cp -r dist/mumax-studio "pkg/$d/"
+          cp packaging/install-linux.sh packaging/mumax-studio.desktop packaging/icon.png README.md LICENSE "pkg/$d/"
+          chmod +x "pkg/$d/install-linux.sh"
+          tar -C pkg -czf "dist/$d.tar.gz" "$d"
+      - name: Package (macOS zip)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ditto -c -k --keepParent dist/mumax-studio.app "dist/mumax-studio-macos-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mumax-studio-${{ matrix.os }}${{ matrix.edition }}
+          path: |
+            studio/dist/*-setup.exe
+            studio/dist/*.zip
+            studio/dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            **Windows:** run `mumax-studio-windows-setup.exe` (or unzip the portable build).
+            **Linux:** unpack the `.tar.gz` and run `./install-linux.sh`, or start `mumax-studio/mumax-studio` directly.
+            **macOS (Apple silicon):** unzip and open `mumax-studio.app` (right-click → Open the first time; the app is not notarised).
+            The `-nvidia` builds include CuPy for NVIDIA GPUs and need a recent NVIDIA driver plus the CUDA 12 toolkit; all builds run on the CPU everywhere.

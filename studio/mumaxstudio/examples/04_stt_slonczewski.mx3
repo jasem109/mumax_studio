@@ -1,0 +1,26 @@
+// Slonczewski spin-transfer-torque switching of an elliptical MTJ free layer (current perpendicular to plane).
+
+SetGridSize(64, 32, 1)
+SetCellSize(160e-9/64, 80e-9/32, 3e-9)
+SetGeom(Ellipse(160e-9, 80e-9))
+
+Msat  = 800e3
+Aex   = 13e-12
+alpha = 0.01
+
+m = Uniform(1, 0, 0)
+Relax()
+
+// fixed layer magnetized along -x; a positive current switches the free layer
+// from +x to -x within ~2 ns (a negative current would stabilize +x instead)
+Pol          = 0.5669
+Lambda       = 1
+EpsilonPrime = 0
+FixedLayer   = vector(-1, 0, 0)
+J            = vector(0, 0, 8e11)
+
+TableAdd(STTorque)
+TableAutoSave(10e-12)
+AutoSave(m, 200e-12)
+Run(4e-9)
+print("final <m> =", m.average())

@@ -1,0 +1,24 @@
+// Hysteresis loop of a permalloy square using a for-loop and Minimize().
+
+SetGridSize(32, 32, 1)
+SetCellSize(4e-9, 4e-9, 4e-9)
+
+Msat  = 800e3
+Aex   = 13e-12
+alpha = 0.5
+
+m = Uniform(1, 0.01, 0)
+Bmax  := 100e-3
+steps := 20
+for i := 0; i <= 2*steps; i++ {
+    b := Bmax * (1 - 2*i/(2*steps))
+    B_ext = vector(b, 0.002, 0)
+    Minimize()
+    TableSave()
+}
+for i := 0; i <= 2*steps; i++ {
+    b := -Bmax * (1 - 2*i/(2*steps))
+    B_ext = vector(b, 0.002, 0)
+    Minimize()
+    TableSave()
+}
