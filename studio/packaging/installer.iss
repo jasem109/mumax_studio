@@ -1,9 +1,9 @@
 ; Inno Setup script: turns dist\mumax-studio\ (from build_exe.py) into a normal Windows installer
 ; with Start-menu / desktop shortcuts, an uninstaller and an "Open with mumax Studio" entry for .mx3 files.
-;   iscc /DAppVersion=0.2.0 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
+;   iscc /DAppVersion=0.2.1 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.2.1"
 #endif
 #ifndef Edition
   #define Edition ""
