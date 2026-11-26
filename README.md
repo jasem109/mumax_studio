@@ -18,10 +18,3 @@ SPINHALL : spin hall angle
 
 DisableSOTorque : Disable SOT torque
 
-
-
-developed by ZJL in Xi'an Jiaotong University
-
-977952515@qq.com
-
-2020.9.20
