@@ -485,11 +485,12 @@ print(magnet.magnetization.average())</pre>
       <span class="small muted" id="asStatus">checking…</span>
       <span class="spacer"></span>
       <button class="btn small" id="asUsageBtn" type="button" title="How much of your Claude plan's usage limits is used" hidden>Usage</button>
-      <select id="asBackend" title="How to reach Claude" aria-label="Connection">
-        <option value="auto">automatic</option>
-        <option value="cli">Claude Code (subscription)</option>
+      <select id="asBackend" title="How to reach Claude: your Claude plan (through Claude Code) or an Anthropic API key" aria-label="Connection">
+        <option value="auto">Auto</option>
+        <option value="cli">Claude plan</option>
         <option value="api">API key</option>
       </select>
+      <button class="btn small icon" id="asClear" type="button" title="Clear the conversation" aria-label="Clear the conversation" hidden>⟲</button>
     </div>
     <div class="ausage" id="asUsage" hidden>
       <div class="auhead"><b>Claude plan usage</b> <span class="small muted" id="asUsagePlan"></span><span class="spacer"></span>
@@ -500,27 +501,33 @@ print(magnet.magnetization.average())</pre>
     </div>
     <div class="alog" id="asLog">
       <div class="aempty" id="asEmpty">
-        <p>Describe a simulation in plain language and Claude writes the script. It can also fix a script that fails, explain one, or review the physics.</p>
-        <p class="muted">Nothing is sent until you press Send. The current script is sent only when you tick the box or use Fix, Explain or Review.</p>
-        <p class="aconnect">Let Claude run simulations itself (it can write a script, run it, read the table and look at snapshots):
+        <p>Describe a simulation and Claude writes the script. Use <b>Fix</b>, <b>Explain</b> or <b>Review</b> for the script in the editor.</p>
+        <div class="atry" id="asExamples">
+          <button class="chip" type="button">Relax a 200 nm permalloy square and save m</button>
+          <button class="chip" type="button">Switch a CoFeB disk with a 2 ns SOT pulse</button>
+          <button class="chip" type="button">Skyrmion in a 100 nm disk with DMI</button>
+        </div>
+        <details class="aconnect"><summary class="small">Let Claude run simulations itself</summary>
+          <p class="small muted">Gives Claude Desktop or Claude Code tools to run scripts and read the results.</p>
           <button class="btn small" id="asConnDesktop" type="button">Connect Claude Desktop</button>
-          <button class="btn small" id="asConnCode" type="button">Connect Claude Code</button></p>
+          <button class="btn small" id="asConnCode" type="button">Connect Claude Code</button></details>
       </div>
       <div class="asetup" id="asSetup" hidden>
-        <h4>Authorize Claude</h4>
-        <p>The assistant works after you sign in with a <b>Claude Pro or Max</b> account. mumax Studio reaches Claude through Claude Code, so the requests count against your plan and no API key is needed.</p>
+        <h4>Sign in to use Claude</h4>
+        <p class="small muted">Needs a Claude Pro or Max plan. No API key required.</p>
         <ol class="asteps">
-          <li id="asStepCli"><span class="astate"></span><b>Install Claude Code.</b>
-            <span id="asCliHelp">Windows (PowerShell): <code>irm https://claude.ai/install.ps1 | iex</code> · macOS / Linux: <code>curl -fsSL https://claude.ai/install.sh | bash</code> · see <code>claude.com/claude-code</code>. Then press <i>Check again</i>.</span></li>
-          <li id="asStepAuth"><span class="astate"></span><b>Sign in with your Claude account.</b>
-            <span id="asAuthHelp">A window opens for the sign-in; choose your Pro or Max account in the browser.</span>
+          <li id="asStepCli"><span class="astate"></span><b>Install Claude Code</b>
+            <span id="asCliHelp">In PowerShell: <code>irm https://claude.ai/install.ps1 | iex</code></span></li>
+          <li id="asStepAuth"><span class="astate"></span><b>Sign in</b>
             <div><button class="btn primary small" id="asLogin" type="button">Sign in with Claude</button></div></li>
         </ol>
         <p class="small" id="asAuthMsg"></p>
-        <p class="small" id="asOtherAcct" hidden><button class="btn small" id="asSignOut2" type="button">Sign out of this account</button></p>
-        <button class="btn small" id="asRecheck" type="button">Check again</button>
-        <details class="akey"><summary class="small">Use an Anthropic API key instead</summary>
-          <p class="small"><span id="asSdkNote">Run <code>pip install anthropic</code> first, then</span> paste the key here. It is stored in your user folder on this computer only, and requests are billed to the API account.</p>
+        <div class="arow">
+          <button class="btn small" id="asRecheck" type="button">Check again</button>
+          <button class="btn small" id="asSignOut2" type="button" hidden>Sign out of this account</button>
+        </div>
+        <details class="akey"><summary class="small">Use an API key instead</summary>
+          <p class="small muted"><span id="asSdkNote">Needs <code>pip install anthropic</code>. </span>Stored only on this computer.</p>
           <div class="keyrow"><input id="asKey" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="API key"><button class="btn small" id="asSaveKey" type="button">Save key</button><button class="btn small" id="asClearKey" type="button">Remove</button></div>
           <p class="small muted" id="asKeyState"></p>
         </details>
@@ -533,13 +540,12 @@ print(magnet.magnetization.average())</pre>
         <label><input type="radio" name="asMode" value="explain"><span>Explain</span></label>
         <label><input type="radio" name="asMode" value="improve"><span>Review</span></label>
       </div>
-      <textarea id="asInput" rows="3" disabled placeholder="Describe the simulation, e.g. “Switch a 40 nm CoFeB disk with a 2 ns spin-orbit torque pulse, JSOT = 1e12 A/m², and record mz.”"></textarea>
+      <textarea id="asInput" rows="2" disabled placeholder="Describe the simulation…"></textarea>
       <div class="arow">
-        <label class="check small" id="asScriptRow"><input type="checkbox" id="asScript"> include the current script</label>
-        <label class="check small"><input type="checkbox" id="asLog2"> include the run log</label>
+        <label class="check small" id="asScriptRow" title="Send the script in the editor with the request"><input type="checkbox" id="asScript"> script</label>
+        <label class="check small" title="Send the last run's log with the request"><input type="checkbox" id="asLog2"> run log</label>
         <span class="spacer"></span>
-        <span class="small muted">Ctrl+Enter</span>
-        <button class="btn primary small" id="asSend" type="button" disabled>Send</button>
+        <button class="btn primary small" id="asSend" type="button" disabled title="Send (Ctrl+Enter). Nothing leaves this computer until you press it.">Send</button>
       </div>
     </div>
   </section>

@@ -2,6 +2,13 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.4.2
+
+- **Tidier Claude panel.** The long instructions are gone. The panel opens with one line and three example
+  requests you can click. Connecting Claude Desktop or Claude Code is folded under "Let Claude run simulations
+  itself", and the sign-in shows two short steps. Long scripts in answers are folded (the buttons under the
+  answer still put them in the editor), and a new button clears the conversation.
+
 ## 0.4.1
 
 - **Arrow size in the viewer.** A size slider now sits next to the glyph and colour menus (0.1× to 5×,

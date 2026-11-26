@@ -283,7 +283,7 @@ def connect_claude_desktop():
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     return {"ok": True, "path": path,
-            "message": f"Added mumax-studio to {path}. Quit Claude Desktop completely and start it again."}
+            "message": "Connected. Restart Claude Desktop to use it."}
 
 
 def connect_claude_code():
@@ -298,8 +298,7 @@ def connect_claude_code():
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode != 0:
         raise AssistantError("claude mcp add failed: " + (r.stderr or r.stdout).strip()[-500:])
-    return {"ok": True, "message": "Registered with Claude Code for your user. In any Claude Code session, ask it "
-                                   "to run a micromagnetic simulation; it will use the mumax-studio tools."}
+    return {"ok": True, "message": "Connected. Ask Claude Code to run a simulation."}
 
 
 # ------------------------------------------------------------------ requests

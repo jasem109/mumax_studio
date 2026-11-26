@@ -12,7 +12,12 @@ const ASSIST = (() => {
     const parts = text.split(/```[A-Za-z0-9_+-]*[ \t]*\n([\s\S]*?)```/g);
     let html = "";
     parts.forEach((p, i) => {
-      if (i % 2) { html += `<pre class="acode">${esc(p.replace(/\n$/, ""))}</pre>`; return; }
+      if (i % 2) {
+        // long scripts fold away: the buttons under the answer put them in the editor
+        const code = p.replace(/\n$/, ""), n = code.split("\n").length;
+        html += `<details class="acodebox"${n <= 15 ? " open" : ""}><summary>Script · ${n} lines</summary><pre class="acode">${esc(code)}</pre></details>`;
+        return;
+      }
       const blocks = p.trim().split(/\n{2,}/);
       for (const b of blocks) {
         if (!b.trim()) continue;
@@ -52,11 +57,10 @@ const ASSIST = (() => {
     $("#asLogin").disabled = !st.cli;
     let msg = "";
     if (st.cli && st.signed_in && !st.authorized) {
-      msg = st.plan ? `Claude Code is signed in with a ${planName(st.plan)} plan${st.account ? " (" + st.account + ")" : ""}. The assistant needs a Claude Pro or Max plan: upgrade at claude.ai, or sign in with another account.`
-        : "Claude Code is signed in without a Claude subscription (for example with an API console account). Sign in with your Claude Pro or Max account.";
+      msg = `${st.account || "This account"} has ${st.plan ? "a " + planName(st.plan) + " plan" : "no Claude plan"}. Sign in with a Pro or Max account.`;
       $("#asLogin").textContent = "Sign in with another account";
     } else $("#asLogin").textContent = "Sign in with Claude";
-    if (pollTimer && !msg && !st.authorized) msg = "Waiting for the sign-in to finish in the browser…";
+    if (pollTimer && !msg && !st.authorized) msg = "Finish the sign-in in the browser…";
     $("#asAuthMsg").textContent = msg;
     $("#asKeyState").textContent = st.api_key ? `A key is ${st.key_source === "environment" ? "set in ANTHROPIC_API_KEY" : "saved on this computer"}.` : "";
     $("#asSdkNote").hidden = st.sdk;
@@ -64,10 +68,10 @@ const ASSIST = (() => {
     $("#asInput").disabled = !ready;
     document.querySelector(".assistant .acompose").hidden = !ready;
     $("#asUsageBtn").hidden = !st.authorized;
-    $("#asOtherAcct").hidden = !(st.signed_in && !st.authorized);
+    $("#asSignOut2").hidden = !(st.signed_in && !st.authorized);
     $("#asAccount").textContent = st.account ? "Signed in as " + st.account : "";
     if (!st.authorized) $("#asUsage").hidden = true;
-    if (st.authorized && pollTimer) { stopPoll(); addMsg("claude", esc(`Signed in with Claude ${planName(st.plan)}. You can now send requests.`)); }
+    if (st.authorized && pollTimer) stopPoll();
     if (!$("#asUsage").hidden) showUsage(st.usage);
   }
 
@@ -137,6 +141,7 @@ const ASSIST = (() => {
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
     $("#asEmpty").hidden = true;
+    $("#asClear").hidden = false;
     return d;
   }
 
@@ -155,7 +160,7 @@ const ASSIST = (() => {
     addMsg("user", `<span class="amode">${label}</span>${esc(req || (mode === "fix" ? "the current script" : "the current script"))}`);
     $("#asInput").value = "";
     busy = true; $("#asSend").disabled = true;
-    const wait = addMsg("wait", "Claude is working on it. Longer scripts can take a minute or two.");
+    const wait = addMsg("wait", "Working");
     const t0 = performance.now();
     let r;
     try { r = await hooks.api("/api/assist", { body }); } catch (e) { r = { error: e.message }; }
@@ -190,7 +195,7 @@ const ASSIST = (() => {
       let r;
       try { r = await hooks.api("/api/assistant/login", { body: {} }); } catch (e) { r = { error: e.message }; }
       if (r.error) { $("#asAuthMsg").textContent = r.error; return; }
-      $("#asAuthMsg").textContent = r.message;
+      $("#asAuthMsg").textContent = "Finish the sign-in in the browser…";
       startPoll();
     });
     const signOut = async () => {
@@ -222,13 +227,22 @@ const ASSIST = (() => {
     document.querySelectorAll('input[name="asMode"]').forEach((r) => r.addEventListener("change", () => {
       const m = document.querySelector('input[name="asMode"]:checked').value;
       $("#asInput").placeholder = {
-        generate: "Describe the simulation, e.g. “Switch a 40 nm CoFeB disk with a 2 ns spin-orbit torque pulse, JSOT = 1e12 A/m², and record mz.”",
-        fix: "Optional: what goes wrong. The current script and its last error are sent with the request.",
-        explain: "Optional: what you want explained. The current script is sent with the request.",
-        improve: "Optional: what to check. Claude reviews cell size, time step, units and boundary conditions.",
+        generate: "Describe the simulation…",
+        fix: "What goes wrong? (optional)",
+        explain: "What should be explained? (optional)",
+        improve: "What should be checked? (optional)",
       }[m];
       $("#asScriptRow").hidden = m !== "generate";
     }));
+    $("#asClear").addEventListener("click", () => {
+      document.querySelectorAll("#asLog .amsg").forEach((m) => m.remove());
+      $("#asClear").hidden = true;
+      refresh();
+    });
+    document.querySelectorAll("#asExamples .chip").forEach((c) => c.addEventListener("click", () => {
+      $("#asInput").value = c.textContent; $("#asInput").focus();
+    }));
+    if (!/Win/.test(navigator.platform)) $("#asCliHelp").innerHTML = "In a terminal: <code>curl -fsSL https://claude.ai/install.sh | bash</code>";
     const saved = h.settings().assistant_backend;
     if (saved) $("#asBackend").value = saved;
     refresh();
