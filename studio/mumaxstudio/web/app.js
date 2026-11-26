@@ -619,6 +619,7 @@ async function run() {
   syncEditor();
   $("#v3source").value = "live";
   VIEW3D.play(false);
+  VIEW3D.resetRecording();
   try {
     const r = await api("/api/run", { body });
     if (r.need_folder) { folderChosen = false; refreshOutPath(); setState("idle"); return run(); }
@@ -741,14 +742,17 @@ function handleStatus(s) {
   }
   if (st.mesh && LAYOUT.isOpen("view") && $("#v3source").value === "live" && !geometryMode()) {
     const now = performance.now();
-    if ((s.state === "running" && now - last3d > 1000) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
+    if ((s.state === "running" && now - last3d > live3dEvery) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
   }
 }
-let last3d = 0, busy3d = false;
+// Small meshes refresh with every status poll; big ones as often as loading the field allows (≤ 1/3 of the time).
+let last3d = 0, busy3d = false, live3dEvery = 400;
 async function load3dLive() {
   if (busy3d) return;
   busy3d = true;
+  const t0 = performance.now();
   try { await VIEW3D.loadLive(api); $("#v3empty").hidden = true; } catch (e) { /* no mesh yet */ }
+  live3dEvery = Math.min(3000, Math.max(350, 3 * (performance.now() - t0)));
   busy3d = false;
 }
 
@@ -970,6 +974,44 @@ function tickDigits(lo, hi, n) {   // significant digits that keep neighbouring 
   const step = (hi - lo) / Math.max(2, Math.floor(n)) || 1, big = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
   return Math.min(8, Math.max(3, Math.ceil(Math.log10(big / step)) + 1));
 }
+// ---- analysis: d/dt, integrals, spectra ... (analysis.js) applied to the plotted columns before drawing
+{
+  const sel = $("#selAna");
+  for (const a of ANALYSIS.LIST) {
+    const o = document.createElement("option");
+    o.value = a.id; o.textContent = a.label; o.title = a.hint;
+    sel.appendChild(o);
+  }
+  const saved = store.get("studioAnalysis");
+  if (saved && ANALYSIS.LIST.some((a) => a.id === saved)) sel.value = saved;
+  const w = Number(store.get("studioAnalysisWin"));
+  if (w >= 3) $("#anaWin").value = w;
+  const changed = () => {
+    $("#anaWinLbl").hidden = sel.value !== "smooth";
+    const a = ANALYSIS.LIST.find((x) => x.id === sel.value);
+    sel.title = a ? a.hint : "";
+    store.set("studioAnalysis", sel.value);
+    store.set("studioAnalysisWin", Number($("#anaWin").value) || 9);
+    drawPlot();
+  };
+  sel.addEventListener("change", changed);
+  $("#anaWin").addEventListener("input", changed);
+  $("#anaWinLbl").hidden = sel.value !== "smooth";
+}
+let anaCache = { key: "", view: null };
+function plotView() {   // what drawPlot draws: { x, xname, xunit, series: [{ j, v, name, unit }], note }
+  const t = plotTable();
+  if (!t || !t.header || !t.rows.length) return null;
+  const xi = Number($("#selX").value) || 0;
+  const ys = $$("#yCols input:checked").map((c) => Number(c.value));
+  const id = $("#selAna").value || "raw", win = Number($("#anaWin").value) || 9;
+  const key = [plotSource, t === staticTable ? "s" : "l", t.rows.length, t.header.length, xi, ys.join(","), id, win].join("|");
+  if (anaCache.key === key && anaCache.t === t) return anaCache.view;
+  const view = ANALYSIS.apply(id, t.header, t.rows, xi, ys, { window: win });
+  anaCache = { key, t, view };
+  return view;
+}
+const seriesColor = (j) => SERIES[(j - 1 + SERIES.length) % SERIES.length];
 function drawPlot() {
   const ctx = plot.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
@@ -979,94 +1021,106 @@ function drawPlot() {
   ctx.clearRect(0, 0, W, H);
   const fg = cssVar("--fg"), muted = cssVar("--muted"), line = cssVar("--line");
   ctx.font = "11px " + cssVar("--font-mono");
-  const t = plotTable();
-  if (!t || !t.header || !t.rows.length) {
+  const message = (txt) => {
     ctx.fillStyle = muted; ctx.textAlign = "center";
     ctx.font = "12px " + cssVar("--font-ui");
-    ctx.fillText("Table rows appear here while the simulation runs.", W / 2, H / 2);
-    return;
-  }
-  const xi = Number($("#selX").value) || 0;
-  const ys = $$("#yCols input:checked").map((c) => Number(c.value));
-  const rows = t.rows;
+    ctx.fillText(txt, W / 2, H / 2);
+  };
+  const v = plotView();
+  if (!v) { message("Table rows appear here while the simulation runs."); return; }
+  if (!v.series.length) { message("Choose what to plot from the “plot” menu above."); return; }
+  const X = v.x, n = X.length;
+  if (!n) { message(v.note || "Nothing to show."); return; }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const r of rows) {
-    const x = r[xi]; if (x < x0) x0 = x; if (x > x1) x1 = x;
-    for (const j of ys) { const y = r[j]; if (isFinite(y)) { if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+  for (let i = 0; i < n; i++) {
+    const x = X[i]; if (!isFinite(x)) continue;
+    let any = false;
+    for (const s of v.series) { const y = s.v[i]; if (isFinite(y)) { any = true; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+    if (any) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
   }
-  if (!ys.length) {
-    ctx.fillStyle = muted; ctx.textAlign = "center";
-    ctx.font = "12px " + cssVar("--font-ui");
-    ctx.fillText("Choose what to plot from the “plot” menu above.", W / 2, H / 2);
-    return;
+  if (!isFinite(x0)) { x0 = 0; x1 = 1; }
+  if (v.xmax > x0 && v.xmax < x1) {   // spectra: leave out the empty high-frequency end (y range follows)
+    x1 = v.xmax; y0 = Infinity; y1 = -Infinity;
+    for (let i = 0; i < n; i++) if (X[i] <= x1) for (const s of v.series) { const y = s.v[i]; if (isFinite(y)) { if (y < y0) y0 = y; if (y > y1) y1 = y; } }
   }
   if (!isFinite(y0)) { y0 = -1; y1 = 1; }
-  if (x1 === x0) x1 = x0 + 1;
-  if (y1 === y0) { y0 -= 0.5; y1 += 0.5; }
+  if (x1 === x0) x1 = x0 + (Math.abs(x0) || 1);
+  if (y1 === y0) { const d = Math.abs(y0) * 0.05 || 0.5; y0 -= d; y1 += d; }
   const pady = (y1 - y0) * 0.06; y0 -= pady; y1 += pady;
   const T = 10, R = 12, B = 30, ph = H - T - B;
   const yd = tickDigits(y0, y1, ph / 40);
   const yticks = niceTicks(y0, y1, Math.max(2, Math.floor(ph / 40)));
-  const L = Math.max(58, Math.max(...yticks.map((v) => ctx.measureText(fmtNum(v, yd)).width)) + 14);
+  const L = Math.max(58, Math.max(...yticks.map((q) => ctx.measureText(fmtNum(q, yd)).width)) + 14);
   const pw = W - L - R;
-  const X = (v) => L + (v - x0) / (x1 - x0) * pw, Y = (v) => T + ph - (v - y0) / (y1 - y0) * ph;
-  const xunit = t.header[xi][1];
+  const PX = (q) => L + (q - x0) / (x1 - x0) * pw, PY = (q) => T + ph - (q - y0) / (y1 - y0) * ph;
+  const xunit = v.xunit;
+  const fx = (q, d) => (xunit ? fmtSI(q, xunit, d) : fmtNum(q, d));
   ctx.strokeStyle = line; ctx.fillStyle = muted; ctx.lineWidth = 1;
   ctx.textAlign = "center"; ctx.textBaseline = "top";
-  for (const v of niceTicks(x0, x1, Math.max(2, Math.floor(pw / 90)))) {
-    const px = Math.round(X(v)) + 0.5;
+  for (const q of niceTicks(x0, x1, Math.max(2, Math.floor(pw / 90)))) {
+    const px = Math.round(PX(q)) + 0.5;
     ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke();
-    ctx.fillText(xunit ? fmtSI(v, xunit, tickDigits(x0, x1, pw / 90)) : fmtNum(v, tickDigits(x0, x1, pw / 90)), px, T + ph + 6);
+    ctx.fillText(fx(q, tickDigits(x0, x1, pw / 90)), px, T + ph + 6);
   }
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
-  for (const v of yticks) {
-    const py = Math.round(Y(v)) + 0.5;
+  for (const q of yticks) {
+    const py = Math.round(PY(q)) + 0.5;
     ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke();
-    ctx.fillText(fmtNum(v, yd), L - 6, py);
+    ctx.fillText(fmtNum(q, yd), L - 6, py);
   }
   ctx.save();
   ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
-  ys.forEach((j) => {
-    ctx.strokeStyle = SERIES[(j - 1 + SERIES.length) % SERIES.length];
+  for (const s of v.series) {
+    ctx.strokeStyle = seriesColor(s.j);
     ctx.lineWidth = 1.6;
     ctx.beginPath();
-    rows.forEach((r, k) => { const px = X(r[xi]), py = Y(r[j]); if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); });
+    let pen = false, last = -1;
+    for (let i = 0; i < n; i++) {
+      const y = s.v[i];
+      if (!isFinite(y) || !isFinite(X[i])) { pen = false; continue; }   // gaps where a value is undefined
+      if (pen) ctx.lineTo(PX(X[i]), PY(y)); else ctx.moveTo(PX(X[i]), PY(y));
+      pen = true; last = i;
+    }
     ctx.stroke();
-    const last = rows[rows.length - 1];
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.beginPath(); ctx.arc(X(last[xi]), Y(last[j]), 2.6, 0, 2 * Math.PI); ctx.fill();
-  });
+    if (last >= 0 && v.xname !== "f") {
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath(); ctx.arc(PX(X[last]), PY(s.v[last]), 2.6, 0, 2 * Math.PI); ctx.fill();
+    }
+  }
   ctx.restore();
   // legend: the plotted columns with their units, top right inside the axes
   ctx.font = "11px " + cssVar("--font-mono");
-  const leg = ys.map((j) => t.header[j][0] + (t.header[j][1] ? ` (${t.header[j][1]})` : ""));
-  const lw = Math.max(...leg.map((s) => ctx.measureText(s).width)) + 30;
+  const leg = v.series.map((s) => s.name + (s.unit ? ` (${s.unit})` : ""));
+  const lw = Math.max(...leg.map((q) => ctx.measureText(q).width)) + 30;
   if (plotHover === null && lw < pw * 0.7) {
     const lx = L + pw - lw - 6, ly = T + 6;
     ctx.fillStyle = cssVar("--panel"); ctx.globalAlpha = 0.85; ctx.fillRect(lx, ly, lw, leg.length * 15 + 6); ctx.globalAlpha = 1;
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    leg.forEach((s, k) => {
-      const c = SERIES[(ys[k] - 1 + SERIES.length) % SERIES.length];
-      ctx.strokeStyle = c; ctx.lineWidth = 2;
+    leg.forEach((q, k) => {
+      ctx.strokeStyle = seriesColor(v.series[k].j); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(lx + 6, ly + 10 + k * 15); ctx.lineTo(lx + 20, ly + 10 + k * 15); ctx.stroke();
-      ctx.fillStyle = fg; ctx.fillText(s, lx + 25, ly + 10 + k * 15);
+      ctx.fillStyle = fg; ctx.fillText(q, lx + 25, ly + 10 + k * 15);
     });
   }
+  if (v.note) {
+    ctx.font = "11px " + cssVar("--font-ui"); ctx.fillStyle = muted; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText(v.note, L + 6, T + ph - 4);
+  }
   if (plotHover !== null && plotHover >= L && plotHover <= L + pw) {
+    ctx.font = "11px " + cssVar("--font-mono");
     const xv = x0 + (plotHover - L) / pw * (x1 - x0);
     let best = 0, bd = Infinity;
-    rows.forEach((r, k) => { const d = Math.abs(r[xi] - xv); if (d < bd) { bd = d; best = k; } });
-    const r = rows[best], px = X(r[xi]);
+    for (let i = 0; i < n; i++) { const d = Math.abs(X[i] - xv); if (d < bd) { bd = d; best = i; } }
+    const px = PX(X[best]);
     ctx.strokeStyle = muted; ctx.setLineDash([3, 3]);
     ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke(); ctx.setLineDash([]);
-    const lines = [`${t.header[xi][0]} = ${xunit ? fmtSI(r[xi], xunit) : fmtNum(r[xi])}`]
-      .concat(ys.map((j) => `${t.header[j][0]} = ${fmtNum(r[j], 5)}`));
-    const tw = Math.max(...lines.map((s) => ctx.measureText(s).width)) + 12;
+    const lines = [`${v.xname} = ${fx(X[best])}`].concat(v.series.map((s) => `${s.name} = ${fmtNum(s.v[best], 5)}${s.unit ? " " + s.unit : ""}`));
+    const tw = Math.max(...lines.map((q) => ctx.measureText(q).width)) + 12;
     const bx = px + tw + 10 > L + pw ? px - tw - 8 : px + 8;
     ctx.fillStyle = cssVar("--panel"); ctx.strokeStyle = line;
     ctx.fillRect(bx, T + 6, tw, lines.length * 15 + 8); ctx.strokeRect(bx + 0.5, T + 6.5, tw, lines.length * 15 + 8);
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    lines.forEach((s, k) => { ctx.fillStyle = k ? SERIES[(ys[k - 1] - 1 + SERIES.length) % SERIES.length] : fg; ctx.fillText(s, bx + 6, T + 11 + k * 15); });
+    lines.forEach((q, k) => { ctx.fillStyle = k ? seriesColor(v.series[k - 1].j) : fg; ctx.fillText(q, bx + 6, T + 11 + k * 15); });
   }
 }
 plot.addEventListener("mousemove", (e) => { plotHover = e.clientX - plot.getBoundingClientRect().left; drawPlot(); });
@@ -1074,8 +1128,17 @@ plot.addEventListener("mouseleave", () => { plotHover = null; drawPlot(); });
 $("#btnCsv").addEventListener("click", () => {
   const t = plotTable();
   if (!t || !t.header) return;
-  const txt = t.header.map(([n, u]) => `${n} (${u})`).join(",") + "\n" + t.rows.map((r) => r.join(",")).join("\n") + "\n";
-  downloadBlob(new Blob([txt], { type: "text/csv" }), "table.csv");
+  const id = $("#selAna").value || "raw";
+  if (id === "raw") {
+    const txt = t.header.map(([n, u]) => `${n} (${u})`).join(",") + "\n" + t.rows.map((r) => r.join(",")).join("\n") + "\n";
+    downloadBlob(new Blob([txt], { type: "text/csv" }), "table.csv");
+    return;
+  }
+  const v = plotView();
+  if (!v || !v.series.length) { toast("Choose columns to plot first"); return; }
+  const head = [`${v.xname} (${v.xunit})`].concat(v.series.map((s) => `${s.name} (${s.unit})`)).join(",");
+  const body = Array.from(v.x, (x, i) => [x].concat(v.series.map((s) => (isFinite(s.v[i]) ? s.v[i] : ""))).join(",")).join("\n");
+  downloadBlob(new Blob([head + "\n" + body + "\n"], { type: "text/csv" }), `table_${id}.csv`);
 });
 
 // ------------------------------------------------------------------ files
@@ -1291,6 +1354,151 @@ $("#v3png").addEventListener("click", () => {
   if (geoEdit2d()) view.toBlob((b) => b && downloadBlob(b, "geometry.png"));
   else VIEW3D.png((b) => downloadBlob(b, geometryMode() ? "geometry3d.png" : "view3d.png"));
 });
+// ---- save video: the live run the viewer showed (recorded as it came in), a file sequence, or a turntable
+const VIDEO = (() => {
+  let busy = false, cancel = false, prevTimer = 0;
+  const KEYS = ["vidSize", "vidW", "vidH", "vidFps", "vidSec", "vidQual", "vidCam", "vidOrbit", "vidBg", "vidBgColor", "vidTime", "vidLegend", "vidFormat"];
+  function size() {
+    const v = $("#vidSize").value;
+    if (v === "panel") {
+      const c = $("#view3d"), w0 = c.clientWidth || 16, h0 = c.clientHeight || 9, sc = 1280 / Math.max(w0, h0);
+      return [Math.round(w0 * sc / 2) * 2, Math.round(h0 * sc / 2) * 2];
+    }
+    if (v === "custom") return [Math.max(64, Math.min(3840, Math.round((Number($("#vidW").value) || 1280) / 2) * 2)), Math.max(64, Math.min(2160, Math.round((Number($("#vidH").value) || 720) / 2) * 2))];
+    return v.split("x").map(Number);
+  }
+  function spec() {
+    const [w, h] = size(), fps = Number($("#vidFps").value) || 12;
+    const bg = $("#vidBg").value === "custom" ? $("#vidBgColor").value : $("#vidBg").value;
+    return {
+      source: $("#vidSource").value, w, h, fps, seconds: Number($("#vidSec").value) || 6,
+      camera: $("#vidCam").value, orbit: Number($("#vidOrbit").value) || 0,
+      glyph: $("#vidGlyph").value, color: $("#vidColor").value, size: Number($("#vidGlyphSize").value) || 1,
+      bg, outline: $("#vidOutline").checked, light: $("#vidLight").checked,
+      timeLabel: $("#vidTime").checked, legend: $("#vidLegend").checked, title: $("#vidTitle").value.trim(),
+      mime: $("#vidFormat").value, bitrate: Math.round(w * h * fps * (Number($("#vidQual").value) || 0.12)),
+      fmtTime: (t) => fmtSI(t, "s", 4),
+    };
+  }
+  function frameCount(sp) {
+    const src = VIEW3D.sources();
+    return sp.source === "current" ? Math.max(1, Math.round(sp.seconds * sp.fps)) : src[sp.source] || 0;
+  }
+  function refresh() {
+    const sp = spec();
+    $("#vidW").disabled = $("#vidH").disabled = $("#vidSize").value !== "custom";
+    if ($("#vidSize").value !== "custom") { $("#vidW").value = sp.w; $("#vidH").value = sp.h; }
+    $("#vidSecLbl").hidden = sp.source !== "current";
+    $("#vidBgColor").parentElement.hidden = $("#vidBg").value !== "custom";
+    const n = frameCount(sp);
+    $("#vidScrub").max = Math.max(0, n - 1);
+    if (Number($("#vidScrub").value) > n - 1) $("#vidScrub").value = Math.max(0, n - 1);
+    const dur = n / sp.fps;
+    const notes = [`${n} frame${n === 1 ? "" : "s"} at ${sp.fps} fps → ${dur < 60 ? dur.toFixed(1) + " s" : (dur / 60).toFixed(1) + " min"} of video, ${sp.w} × ${sp.h}.`,
+      "Frames are recorded in real time, so saving takes as long as the video lasts."];
+    if (sp.source === "live") notes.push("Live frames are the ones the viewer showed during the run (up to a few per second, fewer for large meshes); the viewer must be open while the simulation runs.");
+    $("#vidNote").textContent = notes.join(" ");
+    $("#vidOk").disabled = busy || !n || !sp.mime;
+    keep();
+    clearTimeout(prevTimer);
+    prevTimer = setTimeout(drawPreview, 60);
+  }
+  async function drawPreview() {
+    if (busy) return;
+    const sp = spec(), c = $("#vidPreview");
+    c.height = Math.round(c.width * 300 / 480);
+    const k = Number($("#vidScrub").value) || 0;
+    try { await VIEW3D.preview(sp, k, c); } catch (e) { $("#vidErr").textContent = e.message; $("#vidErr").hidden = false; }
+    const n = frameCount(sp);
+    $("#vidScrubLbl").textContent = n ? `preview: frame ${k + 1} of ${n}` : "no frames";
+  }
+  function keep() {
+    const o = {};
+    for (const k of KEYS) { const el = $("#" + k); o[k] = el.type === "checkbox" ? el.checked : el.value; }
+    store.set("studioVideo", o);
+  }
+  function restore() {
+    const o = store.get("studioVideo") || {};
+    for (const k of KEYS) {
+      const el = $("#" + k);
+      if (!(k in o)) continue;
+      if (el.type === "checkbox") el.checked = !!o[k];
+      else if (el.tagName !== "SELECT" || Array.from(el.options).some((x) => x.value === o[k])) el.value = o[k];
+    }
+  }
+  function open() {
+    if (geometryMode()) { toast("Leave the Geometry page to save a video of the field."); return; }
+    const src = VIEW3D.sources(), r = VIEW3D.recording();
+    const sel = $("#vidSource");
+    sel.innerHTML = "";
+    const add = (v, txt, n) => { const o = document.createElement("option"); o.value = v; o.textContent = txt; o.disabled = !n; sel.appendChild(o); };
+    const span = r.frames > 1 && r.t0 !== null && r.t1 !== null ? `, t = ${fmtSI(r.t0, "s", 3)} … ${fmtSI(r.t1, "s", 3)}` : "";
+    add("live", `Live run: ${r.frames} frame${r.frames === 1 ? "" : "s"}${r.name ? " of " + r.name : ""}${span}`, src.live);
+    add("files", `File sequence: ${src.files} file${src.files === 1 ? "" : "s"}`, src.files);
+    add("current", "Current view only (rotate it)", src.current);
+    const pick = VIEW3D.live ? "live" : src.files > 1 ? "files" : src.live > 1 ? "live" : "current";
+    sel.value = [pick, "live", "files", "current"].find((v) => !sel.querySelector(`option[value="${v}"]`).disabled) || "current";
+    const fmt = $("#vidFormat");
+    fmt.innerHTML = "";
+    const types = VIEW3D.videoTypes();
+    types.forEach(([m, label]) => { const o = document.createElement("option"); o.value = m; o.textContent = label; fmt.appendChild(o); });
+    restore();
+    if (fmt.value === "" && types.length) fmt.value = types[0][0];
+    // style follows the viewer unless changed here
+    const o = VIEW3D.opt;
+    $("#vidGlyph").value = o.glyph; $("#vidColor").value = o.color; $("#vidGlyphSize").value = o.size;
+    $("#vidOutline").checked = o.outline; $("#vidLight").checked = o.light;
+    if (sel.value === "current" && $("#vidOrbit").value === "0") $("#vidOrbit").value = "360";
+    $("#vidErr").hidden = !!types.length;
+    $("#vidErr").textContent = types.length ? "" : "This window cannot record video (no supported format).";
+    $("#vidProg").hidden = true; $("#vidEta").textContent = "";
+    $("#vidScrub").value = 0;
+    showModal("#videoModal", "#vidOk");
+    refresh();
+  }
+  function close() {
+    if (busy) { cancel = true; return; }
+    $("#videoModal").hidden = true;
+    VIEW3D.draw();
+  }
+  async function save() {
+    if (busy) return;
+    const sp = spec();
+    busy = true; cancel = false;
+    $("#vidOk").disabled = true; $("#vidCancel").textContent = "Stop";
+    $("#vidProg").hidden = false; $("#vidBar").style.width = "0";
+    $("#vidErr").hidden = true;
+    const t0 = performance.now();
+    let blob = null;
+    try {
+      blob = await VIEW3D.exportVideo(sp, (k, n) => {
+        $("#vidBar").style.width = (100 * k / n).toFixed(1) + "%";
+        const left = (performance.now() - t0) / k * (n - k) / 1000;
+        $("#vidEta").textContent = `frame ${k} of ${n}` + (k < n ? ` · ${left.toFixed(0)} s left` : " · finishing…");
+      }, () => cancel);
+    } catch (e) {
+      $("#vidErr").textContent = "Could not save the video: " + e.message; $("#vidErr").hidden = false;
+    }
+    busy = false;
+    $("#vidCancel").textContent = "Cancel";
+    $("#vidEta").textContent = "";
+    $("#vidProg").hidden = true;
+    refresh();
+    if (!blob) { if (cancel) toast("Video stopped; nothing saved."); return; }
+    const ext = sp.mime.startsWith("video/mp4") ? "mp4" : "webm";
+    const name = (($("#jobName").value || "view3d").replace(/[^\w-]/g, "_")) + "." + ext;
+    $("#videoModal").hidden = true;
+    await downloadBlob(blob, name);
+  }
+  ["#vidSource", "#vidSize", "#vidW", "#vidH", "#vidFps", "#vidSec", "#vidQual", "#vidCam", "#vidOrbit", "#vidGlyph", "#vidColor",
+   "#vidBg", "#vidBgColor", "#vidTime", "#vidLegend", "#vidOutline", "#vidLight", "#vidFormat"].forEach((q) => $(q).addEventListener("change", refresh));
+  ["#vidGlyphSize", "#vidTitle", "#vidScrub", "#vidW", "#vidH", "#vidBgColor"].forEach((q) => $(q).addEventListener("input", refresh));
+  $("#vidOk").addEventListener("click", save);
+  $("#vidCancel").addEventListener("click", close);
+  $("#videoModal").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+  return { open };
+})();
+$("#v3video").addEventListener("click", () => VIDEO.open());
 $("#v3play").addEventListener("click", () => VIEW3D.play());
 $("#v3prev").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame - 1); });
 $("#v3next").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame + 1); });

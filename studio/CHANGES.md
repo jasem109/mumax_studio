@@ -2,6 +2,23 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.0
+
+- **Analysis in the table plot.** A new "show" menu next to "against" turns the plotted columns into: d/dt and
+  d²/dt² (rate of change in time), d/dx (slope against the x-axis column, e.g. dm/dB), the running integral ∫ dt,
+  a moving average over a chosen number of rows, the change since the first row, values normalised to their
+  largest magnitude, |y|, log₁₀|y|, the amplitude spectrum (FFT, against frequency in Hz) and the power spectrum
+  in dB. Units follow (mx/dt is in 1/s, spectra in GHz), the hover read-out shows the analysed values, and the
+  CSV button saves what is plotted.
+- **Save the 3D view as a video.** The new video button in the viewer saves the live run the viewer just showed
+  (every frame it displayed is kept), a sequence of OVF files, or a turntable of the current view. Choose the
+  size and shape (16:9, 1:1, 4:3, 4:5, 9:16, the viewer's own shape or any width × height), frame rate,
+  quality, camera (as in the viewer, 3D, top, front, side) and a rotation over the video, the glyph, colouring
+  and arrow size, the background colour, a title, the time stamp, the colour key, the box and the shading.
+  A preview with a frame slider shows the result before saving. Saves MP4 (H.264) or WebM.
+- **Smoother live view.** Small meshes now refresh in the viewer a few times per second during a run instead
+  of once per second; large meshes refresh as fast as loading the field allows.
+
 ## 0.4.3
 
 - **The left panel docks like the others.** Setup, Geometry, Drive, Script, Files and Help now sit in a panel

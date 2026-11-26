@@ -563,3 +563,28 @@ textarea#asInput:disabled { opacity: .6; }
 .asteps code { white-space: nowrap; }
 .side .pagehead h2 { display: none; }
 .side .pagehead p { margin-top: 0; }
+
+/* ---- table analysis */
+#anaWin { width: 52px; }
+#anaWinLbl[hidden] { display: none; }
+
+/* ---- save video */
+.modal .card.vidcard { width: min(980px, 96vw); max-height: 94vh; overflow: auto; }
+.vidgrid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; }
+@media (max-width: 860px) { .vidgrid { grid-template-columns: 1fr; } }
+.vidprev { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vidprev canvas { width: 100%; aspect-ratio: 480 / 300; background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel) 0 50%) 0 0 / 16px 16px;
+  border: 1px solid var(--line); border-radius: var(--r); }
+.vidform { display: flex; flex-direction: column; gap: 8px; }
+.vidform label:not(.check) { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
+.vidrow { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.vidrow > label { flex: 1; min-width: 90px; }
+.vidrow > label.vidwh { flex: 0 0 72px; min-width: 0; }
+.vidrow > label.vidcolor { flex: 0 0 56px; min-width: 0; }
+.vidrow label[hidden] { display: none; }
+.vidwh input { width: 100%; }
+.vidcolor input { width: 100%; height: 26px; padding: 0; border: 1px solid var(--line-2); background: none; }
+.vidchecks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.vidprog { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.vidprog[hidden] { display: none; }
+.vidprog div { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }

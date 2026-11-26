@@ -16,6 +16,10 @@ const VIEW3D = (() => {
   let liveSource = false;
   let geoOn = false, saved = null;     // geometry mode: the field / source that was showing before
   const glyph = () => (geoOn ? "cube" : opt.glyph);
+  // Live frames shown during a run are kept for "Save video" (thinned to every other frame past REC_MAX bytes).
+  let rec = [], recBytes = 0;
+  const REC_MAX = 400e6;
+  let exporting = false;   // while a video is rendered the canvas size, field and options belong to the exporter
 
   // ---------------------------------------------------------------- glyph meshes (unit length along +z, centred)
   function cylinder(r0, r1, z0, z1, n, out) {
@@ -254,7 +258,7 @@ const VIEW3D = (() => {
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0);
     gl.bindVertexArray(null);
     draw();
-    emit("info");
+    if (!exporting) emit("info");
   }
   function bindGlyph() {
     gl.bindVertexArray(vao);
@@ -273,16 +277,30 @@ const VIEW3D = (() => {
     const n = parseInt(m[1], 16);
     return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
   }
-  function draw() {
-    if (!ready) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = canvas.clientWidth, Hh = canvas.clientHeight;
-    if (!W || !Hh) return;
-    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(Hh * dpr)) {
-      canvas.width = Math.round(W * dpr); canvas.height = Math.round(Hh * dpr);
+  function hexColor(v) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(v || "");
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+  }
+  // ovr: { w, h, bg: "#rrggbb" } renders at a fixed pixel size (video export); without it, fills the panel
+  function draw(ovr) {
+    if (!ready || (exporting && !ovr)) return;
+    let W, Hh;
+    if (ovr) {
+      W = ovr.w; Hh = ovr.h;
+      if (canvas.width !== W || canvas.height !== Hh) { canvas.width = W; canvas.height = Hh; }
+    } else {
+      const dpr = window.devicePixelRatio || 1;
+      W = canvas.clientWidth; Hh = canvas.clientHeight;
+      if (!W || !Hh) return;
+      if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(Hh * dpr)) {
+        canvas.width = Math.round(W * dpr); canvas.height = Math.round(Hh * dpr);
+      }
     }
     gl.viewport(0, 0, canvas.width, canvas.height);
-    const bg = themeColor("--view-bg", [0.96, 0.95, 0.93]);
+    const bg = (ovr && hexColor(ovr.bg)) || themeColor("--view-bg", [0.96, 0.95, 0.93]);
+    const lum = 0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2];
     gl.clearColor(bg[0], bg[1], bg[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (!field) return;
@@ -313,7 +331,7 @@ const VIEW3D = (() => {
       gl.useProgram(lineProg);
       gl.uniformMatrix4fv(gl.getUniformLocation(lineProg, "uPV"), false, PV);
       gl.bindVertexArray(lineVao);
-      gl.uniform3fv(gl.getUniformLocation(lineProg, "uColor"), themeColor("--view-line", [0.45, 0.45, 0.45]));
+      gl.uniform3fv(gl.getUniformLocation(lineProg, "uColor"), ovr && ovr.bg ? (lum > 0.5 ? [0.42, 0.42, 0.42] : [0.62, 0.62, 0.62]) : themeColor("--view-line", [0.45, 0.45, 0.45]));
       gl.drawArrays(gl.LINES, 0, 24);
       const cols = [[0.75, 0.21, 0.17], [0.15, 0.55, 0.3], [0.19, 0.33, 0.78]];
       for (let i = 0; i < 3; i++) { gl.uniform3fv(gl.getUniformLocation(lineProg, "uColor"), cols[i]); gl.drawArrays(gl.LINES, 24 + 2 * i, 2); }
@@ -355,13 +373,16 @@ const VIEW3D = (() => {
     }, { passive: false });
   }
   function viewFrom(which) {
+    setCam(which);
+    draw();
+  }
+  function setCam(which) {
     Object.assign(cam, { tx: 0, ty: 0, tz: 0 });
     if (which === "top") { cam.yaw = -Math.PI / 2; cam.pitch = 1.5699; }
     else if (which === "front") { cam.yaw = -Math.PI / 2; cam.pitch = 0; }
     else if (which === "side") { cam.yaw = 0; cam.pitch = 0; }
     else { cam.yaw = -0.6; cam.pitch = 0.75; }
     cam.dist = 2.6 * Math.max(0.55, Math.max(...extent));
-    draw();
   }
 
   // ---------------------------------------------------------------- frames
@@ -373,7 +394,7 @@ const VIEW3D = (() => {
     emit("frames");
   }
   async function showFrame(i) {
-    if (!frames.length) return;
+    if (!frames.length || exporting) return;
     cur = (i + frames.length) % frames.length;
     const fr = frames[cur];
     try {
@@ -403,6 +424,8 @@ const VIEW3D = (() => {
   async function loadLive(api) {
     const buf = await api("/api/field3d?q=" + encodeURIComponent(document.getElementById("v3quantity").value || "m"), { binary: true });
     const f = OVF.fromStudio(buf);
+    record(f);
+    if (exporting) return;
     if (geoOn) { saved = { field: f, live: true }; frames = []; cur = -1; return; }
     const first = !field || !liveSource || field.nx !== f.nx || field.ny !== f.ny || field.nz !== f.nz;
     field = f; liveSource = true;
@@ -443,6 +466,199 @@ const VIEW3D = (() => {
     }
   }
 
+  // ---------------------------------------------------------------- recording of live frames
+  function record(f) {
+    const last = rec[rec.length - 1];
+    if (last && (last.nx !== f.nx || last.ny !== f.ny || last.nz !== f.nz || last.ncomp !== f.ncomp || last.name !== f.name)) resetRecording();
+    const bytes = f.data.byteLength + f.norm.byteLength + f.geom.byteLength;
+    if (last && last.t === f.t) { recBytes -= last.bytes; rec[rec.length - 1] = f; }
+    else rec.push(f);
+    f.bytes = bytes; recBytes += bytes;
+    if (recBytes > REC_MAX && rec.length > 4) {
+      const keep = rec.filter((_, i) => i % 2 === 0 || i === rec.length - 1);
+      rec = keep; recBytes = keep.reduce((a, x) => a + x.bytes, 0);
+    }
+  }
+  function resetRecording() { rec = []; recBytes = 0; }
+  function recording() {
+    return { frames: rec.length, t0: rec.length ? rec[0].t : null, t1: rec.length ? rec[rec.length - 1].t : null,
+             name: rec.length ? rec[0].name : "", mb: recBytes / 1e6 };
+  }
+
+  // ---------------------------------------------------------------- video export
+  // spec: { source: "live" | "files" | "current", w, h, fps, seconds (current only), camera: "current" | "iso" |
+  //   "top" | "front" | "side", orbit (degrees over the whole video), glyph, color, size, bg, outline, light,
+  //   timeLabel, legend, title, mime, bitrate }
+  function sources() {
+    return { live: rec.length, files: frames.length, current: field && !geoOn ? 1 : 0 };
+  }
+  function frameList(spec) {
+    if (spec.source === "live") return rec.map((f) => ({ get: async () => f, name: f.name }));
+    if (spec.source === "files") return frames.map((fr) => ({ get: async () => fr.field || (fr.field = await fr.load()), name: fr.name }));
+    const f = field;
+    const n = Math.max(1, Math.round((spec.seconds || 4) * spec.fps));
+    return Array.from({ length: n }, () => ({ get: async () => f, name: f ? f.name : "" }));
+  }
+  function textColor(bg) {
+    const c = hexColor(bg) || themeColor("--view-bg", [0.96, 0.95, 0.93]);
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.5 ? "#1d1c1a" : "#f2f1ee";
+  }
+  function overlay(ctx, spec, f, fr, k, n) {
+    const W = spec.w, H = spec.h, u = Math.max(12, Math.round(Math.min(W, H) / 36));
+    ctx.fillStyle = textColor(spec.bg);
+    ctx.textBaseline = "top";
+    ctx.font = `${u}px ui-monospace, Consolas, monospace`;
+    if (spec.timeLabel) {
+      const tl = f.t !== null && f.t !== undefined && isFinite(f.t) ? "t = " + (spec.fmtTime ? spec.fmtTime(f.t) : f.t.toExponential(3) + " s")
+        : spec.source === "current" ? "" : fr.name || `frame ${k + 1} / ${n}`;
+      ctx.textAlign = "left"; ctx.fillText(tl, u, u);
+    }
+    if (spec.title) {
+      ctx.font = `600 ${Math.round(u * 1.15)}px system-ui, "Segoe UI", sans-serif`;
+      ctx.textAlign = "center"; ctx.fillText(spec.title, W / 2, u);
+    }
+    if (spec.legend && f.ncomp >= 3 && spec.color === "wheel") {
+      const r = Math.round(u * 2.2), cx = W - 2.4 * u - r, cy = H - u - r;
+      for (let a = 0; a < 360; a += 2) {
+        ctx.beginPath(); ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, (a - 1) * Math.PI / 180, (a + 1.5) * Math.PI / 180);
+        ctx.closePath(); ctx.fillStyle = `hsl(${-a},100%,50%)`; ctx.fill();   // canvas y points down: angle = -a
+      }
+      ctx.font = `${Math.round(u * 0.8)}px ui-monospace, Consolas, monospace`;
+      ctx.fillStyle = textColor(spec.bg); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("+x", cx + r + u * 0.9, cy); ctx.fillText("+y", cx, cy - r - u * 0.6);
+      ctx.textAlign = "right"; ctx.fillText("white +z · black −z", cx - r - u * 0.6, cy + r - u * 0.3);
+    } else if (spec.legend) {
+      const bw = Math.round(Math.min(W * 0.3, u * 12)), bh = Math.round(u * 0.6), x0 = W - u - bw, y0 = H - u - bh;
+      const g = ctx.createLinearGradient(x0, 0, x0 + bw, 0);
+      if (f.ncomp === 1 || spec.color !== "mag") { g.addColorStop(0, "#3054c7"); g.addColorStop(0.5, "#f5f2ed"); g.addColorStop(1, "#bf362b"); }
+      else { g.addColorStop(0, "#1a1a1f"); g.addColorStop(1, "#fab840"); }
+      ctx.fillStyle = g; ctx.fillRect(x0, y0, bw, bh);
+      ctx.font = `${Math.round(u * 0.8)}px ui-monospace, Consolas, monospace`;
+      ctx.fillStyle = textColor(spec.bg); ctx.textBaseline = "bottom";
+      const lbl = f.ncomp === 1 ? "value / max" : spec.color === "mag" ? "|v| / max" : `${spec.color} / max`;
+      const lo = f.ncomp === 1 || spec.color !== "mag" ? "−1" : "0";
+      ctx.textAlign = "left"; ctx.fillText(lo, x0, y0 - 3);
+      ctx.textAlign = "center"; ctx.fillText(lbl, x0 + bw / 2, y0 - 3);
+      ctx.textAlign = "right"; ctx.fillText("1", x0 + bw, y0 - 3);
+    }
+  }
+  // Renders frame k of the export into the 2D context ctx (sized spec.w × spec.h). Caller holds the export state.
+  let expState = null;
+  async function renderExportFrame(spec, list, k, ctx) {
+    const fr = list[k];
+    const f = await fr.get();
+    if (!f) return;
+    if (field !== f) { field = f; build(); }
+    if (k === 0 || !expState.camSet) {
+      if (spec.camera === "current") Object.assign(cam, expState.cam); else setCam(spec.camera);
+      expState.baseYaw = cam.yaw; expState.camSet = true;
+    }
+    cam.yaw = expState.baseYaw + (spec.orbit || 0) * Math.PI / 180 * (list.length > 1 ? k / list.length : 0);
+    draw({ w: spec.w, h: spec.h, bg: spec.bg });
+    ctx.clearRect(0, 0, spec.w, spec.h);
+    ctx.drawImage(canvas, 0, 0, spec.w, spec.h);
+    overlay(ctx, spec, f, fr, k, list.length);
+  }
+  function beginExport(spec) {
+    if (exporting) throw new Error("A video is already being saved.");
+    expState = { field, opt: JSON.parse(JSON.stringify(opt)), cam: { ...cam }, camSet: false };
+    exporting = true;
+    Object.assign(opt, { glyph: spec.glyph || opt.glyph, color: spec.color || opt.color, size: spec.size || opt.size,
+                         outline: spec.outline !== false, light: spec.light !== false });
+    field = null;
+  }
+  function endExport() {
+    if (!expState) return;
+    field = expState.field;
+    Object.assign(opt, expState.opt);
+    Object.assign(cam, expState.cam);
+    expState = null;
+    exporting = false;
+    build();
+  }
+  // A still of one frame with the export settings, for the preview in the dialog.
+  async function preview(spec, k, target) {
+    if (exporting) return;
+    const list = frameList(spec);
+    if (!list.length) return;
+    k = Math.max(0, Math.min(list.length - 1, k | 0));
+    const scale = Math.min(1, target.width / spec.w, target.height / spec.h);
+    const ps = { ...spec, w: Math.max(2, Math.round(spec.w * scale)), h: Math.max(2, Math.round(spec.h * scale)) };
+    beginExport(ps);
+    try {
+      const c = document.createElement("canvas"); c.width = ps.w; c.height = ps.h;
+      await renderExportFrame(ps, list, k, c.getContext("2d"));
+      const tc = target.getContext("2d");
+      tc.clearRect(0, 0, target.width, target.height);
+      tc.drawImage(c, Math.round((target.width - ps.w) / 2), Math.round((target.height - ps.h) / 2));
+    } finally { endExport(); }
+  }
+  function videoTypes() {
+    const R = window.MediaRecorder;
+    const all = [["video/mp4;codecs=avc1.640028", "MP4 (H.264)"], ["video/mp4", "MP4"], ["video/webm;codecs=vp9", "WebM (VP9)"],
+                 ["video/webm;codecs=vp8", "WebM (VP8)"], ["video/webm", "WebM"]];
+    const ok = R && R.isTypeSupported ? all.filter(([m]) => R.isTypeSupported(m)) : [];
+    // one entry per container
+    return ok.filter(([m], i) => ok.findIndex(([n]) => n.split(";")[0] === m.split(";")[0]) === i);
+  }
+  // Renders every frame in real time (MediaRecorder timestamps frames by the clock), so a video of N frames at
+  // F fps takes N / F seconds. progress(k, n) after each frame; cancelled() stops early (no file).
+  // The first H.264 recording of a session can come out empty while the encoder starts up: try again, then WebM.
+  async function exportVideo(spec, progress, cancelled) {
+    let blob = await recordVideo(spec, progress, cancelled);
+    if (blob && !blob.size) blob = await recordVideo(spec, progress, cancelled);
+    if (blob && !blob.size && !/webm/.test(spec.mime)) {
+      const alt = videoTypes().find(([m]) => /webm/.test(m));
+      if (alt) blob = await recordVideo({ ...spec, mime: alt[0] }, progress, cancelled);
+    }
+    if (blob && !blob.size) throw new Error("the video encoder produced no data. Try another format or a smaller size.");
+    return blob;
+  }
+  async function recordVideo(spec, progress, cancelled) {
+    if (!window.MediaRecorder) throw new Error("This browser cannot record video (no MediaRecorder).");
+    const list = frameList(spec);
+    if (!list.length) throw new Error("There are no frames to save.");
+    const out = document.createElement("canvas");
+    out.width = spec.w; out.height = spec.h;
+    const ctx = out.getContext("2d");
+    const stream = out.captureStream(0);
+    const track = stream.getVideoTracks()[0];
+    const mr = new MediaRecorder(stream, { mimeType: spec.mime, videoBitsPerSecond: spec.bitrate || 8e6 });
+    const chunks = [];
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise((res) => { mr.onstop = res; });
+    beginExport(spec);
+    let aborted = false;
+    try {
+      // the first frame is rendered before the recorder starts, so the video does not open on an empty canvas
+      await renderExportFrame(spec, list, 0, ctx);
+      const started = new Promise((res) => { mr.onstart = res; });
+      mr.start(1000);
+      await started;
+      track.requestFrame ? track.requestFrame() : stream.requestFrame && stream.requestFrame();   // primes the encoder
+      await new Promise((r) => setTimeout(r, 150));
+      const dt = 1000 / spec.fps;
+      const t0 = performance.now();
+      for (let k = 0; k < list.length; k++) {
+        if (cancelled && cancelled()) { aborted = true; break; }
+        if (k) await renderExportFrame(spec, list, k, ctx);
+        const wait = t0 + k * dt - performance.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        track.requestFrame ? track.requestFrame() : stream.requestFrame && stream.requestFrame();
+        if (progress) progress(k + 1, list.length);
+      }
+      await new Promise((r) => setTimeout(r, dt));   // the last frame lasts one frame period
+    } finally {
+      if (mr.state !== "inactive") mr.stop();
+      await stopped;
+      track.stop();
+      endExport();
+    }
+    if (aborted) return null;
+    return new Blob(chunks, { type: spec.mime.split(";")[0] });
+  }
+
   // ---------------------------------------------------------------- misc
   function status(t) {
     const el = document.getElementById("v3status");
@@ -471,6 +687,8 @@ const VIEW3D = (() => {
     init, draw, build, on, info, play, showFrame, viewFrom, loadLive, addLocalFiles, addWorkspaceFiles, status, geometry,
     opt, get playing() { return playing; }, get hasField() { return geoOn ? !!(saved && saved.field) : !!field; },
     get live() { return geoOn ? !!(saved && saved.live) : liveSource; },
+    get exporting() { return exporting; }, get geometryOn() { return geoOn; },
     png(cb) { draw(); canvas.toBlob(cb); },
+    recording, resetRecording, sources, videoTypes, exportVideo, preview, cam,
   };
 })();

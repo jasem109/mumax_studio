@@ -28,6 +28,7 @@
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></symbol>
     <symbol id="i-min" viewBox="0 0 24 24"><path d="M6 15h12"/></symbol>
     <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
     <symbol id="i-restore" viewBox="0 0 24 24"><rect x="5" y="8" width="11" height="11" rx="1"/><path d="M8 8V5h11v11h-3"/></symbol>
@@ -428,6 +429,7 @@ print(magnet.magnetization.average())</pre>
       </div>
       <button class="iconbtn" id="v3refresh" title="Reload" aria-label="Reload"><svg><use href="#i-refresh"/></svg></button>
       <button class="iconbtn" id="v3png" title="Save image" aria-label="Save image"><svg><use href="#i-image"/></svg></button>
+      <button class="iconbtn" id="v3video" title="Save video: the live run the viewer showed, a file sequence, or a turntable of the current view" aria-label="Save video"><svg><use href="#i-video"/></svg></button>
     </div>
     <div class="canvaswrap" id="v3wrap" tabindex="0">
       <canvas id="view3d"></canvas>
@@ -459,8 +461,10 @@ print(magnet.magnetization.average())</pre>
         </div>
       </details>
       <label class="small">against <select id="selX" title="The x axis"></select></label>
+      <label class="small" title="Analysis applied to the plotted columns">show <select id="selAna" aria-label="Analysis"></select></label>
+      <label class="small" id="anaWinLbl" title="Number of rows averaged" hidden>over <input type="number" id="anaWin" min="3" max="999" step="2" value="9"> rows</label>
       <span class="spacer"></span>
-      <button class="btn small" id="btnCsv" title="Download the table as CSV">CSV</button>
+      <button class="btn small" id="btnCsv" title="Download what is plotted as CSV (the analysed columns when an analysis is chosen)">CSV</button>
     </div>
     <div class="canvaswrap"><canvas id="plot"></canvas></div>
   </section>
@@ -599,6 +603,65 @@ print(magnet.magnetization.average())</pre>
     <div class="acts"><button class="btn small" id="saveDownload" type="button" title="Let the browser download a copy instead">Download copy</button><span class="spacer"></span><button class="btn small" id="saveCancel" type="button">Cancel</button><button class="btn small primary" id="saveOk" type="button">Save</button></div>
   </div>
 </div>
+<div class="modal" id="videoModal" hidden role="dialog" aria-modal="true" aria-labelledby="videoTitle">
+  <div class="card vidcard">
+    <h3 id="videoTitle">Save video</h3>
+    <div class="vidgrid">
+      <div class="vidprev">
+        <canvas id="vidPreview" width="480" height="300"></canvas>
+        <input type="range" id="vidScrub" min="0" max="0" value="0" aria-label="Preview frame">
+        <div class="small muted mono" id="vidScrubLbl">&nbsp;</div>
+      </div>
+      <div class="vidform small">
+        <label>Frames <select id="vidSource"></select></label>
+        <div class="vidrow">
+          <label>Size <select id="vidSize">
+            <option value="1280x720">1280 × 720 (16:9)</option>
+            <option value="1920x1080">1920 × 1080 (16:9)</option>
+            <option value="1080x1080">1080 × 1080 (1:1)</option>
+            <option value="1024x768">1024 × 768 (4:3)</option>
+            <option value="1080x1350">1080 × 1350 (4:5)</option>
+            <option value="1080x1920">1080 × 1920 (9:16)</option>
+            <option value="panel">same shape as the viewer</option>
+            <option value="custom">custom…</option>
+          </select></label>
+          <label class="vidwh">W <input type="number" id="vidW" min="64" max="3840" step="2" value="1280"></label>
+          <label class="vidwh">H <input type="number" id="vidH" min="64" max="2160" step="2" value="720"></label>
+        </div>
+        <div class="vidrow">
+          <label>Frame rate <select id="vidFps"><option>4</option><option>8</option><option selected>12</option><option>24</option><option>30</option><option>60</option></select></label>
+          <label id="vidSecLbl">Length (s) <input type="number" id="vidSec" min="1" max="120" value="6"></label>
+          <label>Quality <select id="vidQual"><option value="0.06">standard</option><option value="0.12" selected>high</option><option value="0.25">very high</option></select></label>
+        </div>
+        <div class="vidrow">
+          <label>Camera <select id="vidCam"><option value="current">as in the viewer now</option><option value="iso">3D</option><option value="top">top (+z)</option><option value="front">front (−y)</option><option value="side">side (+x)</option></select></label>
+          <label>Rotate <select id="vidOrbit"><option value="0">no</option><option value="90">90° over the video</option><option value="180">180°</option><option value="360">a full turn</option><option value="720">two turns</option></select></label>
+        </div>
+        <div class="vidrow">
+          <label>Glyph <select id="vidGlyph"><option value="arrow">arrows</option><option value="cone">cones</option><option value="cube">cells</option></select></label>
+          <label>Colour <select id="vidColor"><option value="wheel">colour wheel</option><option value="x">x</option><option value="y">y</option><option value="z">z</option><option value="mag">|v|</option></select></label>
+          <label>Size <input type="range" id="vidGlyphSize" min="0.1" max="5" step="0.05" value="1"></label>
+        </div>
+        <div class="vidrow">
+          <label>Background <select id="vidBg"><option value="">as the app theme</option><option value="#ffffff">white</option><option value="#000000">black</option><option value="#1e1e22">dark grey</option><option value="custom">custom…</option></select></label>
+          <label class="vidcolor">&nbsp;<input type="color" id="vidBgColor" value="#202830" aria-label="Background colour"></label>
+        </div>
+        <label>Title <input id="vidTitle" placeholder="(none)" spellcheck="false"></label>
+        <div class="vidchecks">
+          <label class="check"><input type="checkbox" id="vidTime" checked> time</label>
+          <label class="check"><input type="checkbox" id="vidLegend" checked> colour key</label>
+          <label class="check"><input type="checkbox" id="vidOutline" checked> box and axes</label>
+          <label class="check"><input type="checkbox" id="vidLight" checked> shading</label>
+        </div>
+        <label>Format <select id="vidFormat"></select></label>
+      </div>
+    </div>
+    <p class="small muted" id="vidNote"></p>
+    <div class="vidprog" id="vidProg" hidden><div id="vidBar"></div></div>
+    <p class="small err" id="vidErr" hidden></p>
+    <div class="acts"><span class="small muted" id="vidEta"></span><span class="spacer"></span><button class="btn small" id="vidCancel" type="button">Cancel</button><button class="btn small primary" id="vidOk" type="button">Save video</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" hidden></div>
 <aside class="updatecard" id="updateCard" role="status" aria-live="polite" hidden>
   <div class="uc-head"><span class="uc-kicker">Update available</span><button class="uc-x" id="ucClose" type="button" aria-label="Later">×</button></div>
@@ -617,6 +680,7 @@ print(magnet.magnetization.average())</pre>
 <script src="drive.js"></script>
 <script src="layout.js"></script>
 <script src="ovf.js"></script>
+<script src="analysis.js"></script>
 <script src="view3d.js"></script>
 <script src="assistant.js"></script>
 <script src="app.js"></script>
