@@ -2,6 +2,14 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.4.1
+
+- **Arrow size in the viewer.** A size slider now sits next to the glyph and colour menus (0.1× to 5×,
+  double-click to reset) and is remembered between sessions.
+- **Updates restart cleanly.** After an in-app update the new version no longer stops with a NumPy
+  "DLL load failed" message: it waits for freshly installed files to be released before starting, and the
+  installer starts only one copy of the app.
+
 ## 0.4.0
 
 - **Choose where results are saved.** The output folder can be any folder on the computer and is remembered.

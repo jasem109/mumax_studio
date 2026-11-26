@@ -39,11 +39,35 @@ def _attach_std_handles():
             pass
 
 
+def _import_numpy_patiently(timeout=30.0):
+    """Right after an in-app update the installer starts the new version while freshly written DLLs/.pyd files can
+    still be locked (the installer finishing, antivirus scanning them): importing NumPy then fails with "DLL load
+    failed ... being used by another process". Wait for the lock to clear instead of crashing."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            import numpy  # noqa: F401
+            import scipy.fft  # noqa: F401
+            return
+        except ImportError as e:
+            msg = str(e).lower()
+            locked = "being used by another process" in msg or "dll load failed" in msg
+            if not locked or time.monotonic() > deadline:
+                raise
+            for m in [m for m in sys.modules if m.split(".")[0] in ("numpy", "scipy")]:
+                del sys.modules[m]  # forget the half-imported package so the next attempt starts clean
+            time.sleep(1.0)
+
+
 def main():
     argv = sys.argv[1:]
     if argv and argv[0] == "mcp":
         _attach_std_handles()
     _redirect_output_if_windowed()
+    if getattr(sys, "frozen", False):
+        _import_numpy_patiently()
     from mumaxstudio.__main__ import main as cli
 
     commands = {"gui", "run", "info", "convert", "mcp", "bench", "-h", "--help"}

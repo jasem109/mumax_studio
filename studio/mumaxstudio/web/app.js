@@ -1254,6 +1254,8 @@ function v3opts() {
   o.color = $("#v3color").value;
   o.stride = Math.max(1, Number($("#v3stride").value) || 1);
   o.size = Number($("#v3size").value) || 1;
+  $("#v3sizeVal").textContent = o.size.toFixed(o.size < 1 ? 2 : 1) + "×";
+  store.set("studioGlyphSize", o.size);
   const r = (a, b) => { let x = Number($(a).value), y = Number($(b).value); if (y < x) [x, y] = [y, x]; return [x, Math.max(y, x + 0.001)]; };
   o.slice = [r("#v3x0", "#v3x1"), r("#v3y0", "#v3y1"), r("#v3z0", "#v3z1")];
   o.outline = $("#v3outline").checked;
@@ -1262,6 +1264,11 @@ function v3opts() {
 }
 ["#v3glyph", "#v3color", "#v3stride", "#v3outline", "#v3light"].forEach((s) => $(s).addEventListener("change", v3opts));
 ["#v3size", "#v3x0", "#v3x1", "#v3y0", "#v3y1", "#v3z0", "#v3z1"].forEach((s) => $(s).addEventListener("input", v3opts));
+$("#v3size").addEventListener("dblclick", () => { $("#v3size").value = 1; v3opts(); });
+{
+  const s = Number(store.get("studioGlyphSize"));
+  if (s > 0) { $("#v3size").value = s; v3opts(); }
+}
 $("#v3sliceReset").addEventListener("click", () => {
   ["#v3x0", "#v3y0", "#v3z0"].forEach((s) => { $(s).value = 0; });
   ["#v3x1", "#v3y1", "#v3z1"].forEach((s) => { $(s).value = 1; });

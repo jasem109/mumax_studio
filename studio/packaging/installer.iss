@@ -1,9 +1,9 @@
 ; Inno Setup script: turns dist\mumax-studio\ (from build_exe.py) into a normal Windows installer
 ; with Start-menu / desktop shortcuts, an uninstaller and an "Open with mumax Studio" entry for .mx3 files.
-;   iscc /DAppVersion=0.4.0 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
+;   iscc /DAppVersion=0.4.1 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
 
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.4.1"
 #endif
 #ifndef Edition
   #define Edition ""
@@ -30,6 +30,10 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ChangesAssociations=yes
+; the app quits by itself before an in-app update and the [Run] entry below restarts it; letting the Restart
+; Manager restart it too would start two copies, racing the file copy
+CloseApplications=yes
+RestartApplications=no
 LicenseFile=..\LICENSE
 
 [Tasks]

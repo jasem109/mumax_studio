@@ -366,6 +366,9 @@ textarea.code { width: 100%; margin-top: 8px; font: 12px/1.5 var(--font-mono); b
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; pointer-events: none; padding: 20px; }
 .empty b { color: var(--ink); font-weight: 600; }
 .layerctl { display: flex; align-items: center; gap: 5px; }
+.sizectl { display: inline-flex; align-items: center; gap: 5px; }
+.sizectl input { width: 80px; }
+.sizectl output { font-family: var(--font-mono); min-width: 4ch; font-size: 11px; color: var(--muted); }
 .layerctl input { width: 90px; }
 #selQuantity, #v3quantity { max-width: 150px; }
 .layerctl output { font-family: var(--font-mono); min-width: 2ch; }
