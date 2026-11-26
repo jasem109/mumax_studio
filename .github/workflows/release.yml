@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: studio } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
@@ -42,8 +42,8 @@ jobs:
       VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
       SIGN: ${{ secrets.AZURE_CLIENT_ID != '' && 'true' || 'false' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - name: Install build dependencies
         shell: bash
@@ -126,7 +126,7 @@ jobs:
         run: |
           ditto -c -k --keepParent dist/mumax-studio.app "dist/mumax-studio-macos-arm64.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mumax-studio-${{ matrix.os }}${{ matrix.edition }}
           path: |
@@ -140,11 +140,11 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { path: out, merge-multiple: true }
       - name: Checksums
         run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { path: src, sparse-checkout: studio/CHANGES.md, sparse-checkout-cone-mode: false }
       - name: Release notes (this version's section of studio/CHANGES.md, then the install notes)
         run: |
