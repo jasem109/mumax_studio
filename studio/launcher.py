@@ -18,12 +18,35 @@ def _redirect_output_if_windowed():
         sys.stderr = sys.stderr or f
 
 
+def _attach_std_handles():
+    """`mumax-studio mcp` speaks JSON over stdin/stdout. A windowed (GUI) build starts with sys.stdin/stdout set to
+    None even when the parent (Claude Desktop, Claude Code) passed pipes, so reopen them from the OS handles."""
+    if os.name != "nt" or (sys.stdin is not None and sys.stdout is not None):
+        return
+    import ctypes
+    import msvcrt
+
+    k32 = ctypes.windll.kernel32
+    k32.GetStdHandle.restype = ctypes.c_void_p
+    for std, name, mode in ((-10, "stdin", "r"), (-11, "stdout", "w")):
+        h = k32.GetStdHandle(std)
+        if h in (None, 0, ctypes.c_void_p(-1).value):
+            continue
+        try:
+            fd = msvcrt.open_osfhandle(h, os.O_RDONLY if mode == "r" else os.O_WRONLY)
+            setattr(sys, name, open(fd, mode, encoding="utf-8", buffering=1, newline="\n"))
+        except OSError:
+            pass
+
+
 def main():
+    argv = sys.argv[1:]
+    if argv and argv[0] == "mcp":
+        _attach_std_handles()
     _redirect_output_if_windowed()
     from mumaxstudio.__main__ import main as cli
 
-    argv = sys.argv[1:]
-    commands = {"gui", "run", "info", "convert", "-h", "--help"}
+    commands = {"gui", "run", "info", "convert", "mcp", "bench", "-h", "--help"}
     if not argv:
         argv = ["gui", "--native"]
     elif argv[0] not in commands and os.path.isfile(argv[0]) and argv[0].lower().endswith((".mx3", ".py")) \

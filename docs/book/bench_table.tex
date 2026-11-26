@@ -1,0 +1,15 @@
+\begin{tabular}{l rr rr rr}
+\toprule
+ & \multicolumn{2}{c}{CPU float32} & \multicolumn{2}{c}{CPU float64} & \multicolumn{2}{c}{float32, 1 FFT thread}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Mesh & ms & Mcell/s & ms & Mcell/s & ms & Mcell/s\\
+\midrule
+$32\times32\times1$ & 2.6 & 0.39 & 3.1 & 0.33 & 3.7 & 0.27\\
+$64\times64\times1$ & 4.5 & 0.90 & 7.0 & 0.59 & 6.3 & 0.65\\
+$128\times128\times1$ & 20.9 & 0.79 & 37.6 & 0.44 & 21.2 & 0.77\\
+$256\times256\times1$ & 133 & 0.49 & 341 & 0.19 & 154 & 0.42\\
+$512\times512\times1$ & 815 & 0.32 & 1609 & 0.16 & 798 & 0.33\\
+$1024\times1024\times1$ & 3465 & 0.30 & 6470 & 0.16 & -- & --\\
+$128\times128\times16$ & 1518 & 0.17 & 2773 & 0.09 & 1510 & 0.17\\
+\bottomrule
+\end{tabular}

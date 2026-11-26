@@ -14,7 +14,7 @@ from .configs import Uniform, RandomMag, RandomMagSeed, Conical, Helical
 from .simulation import Simulation, SimulationStopped
 from .util import vector
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 __all__ = [
     "Simulation", "SimulationStopped", "Backend", "gpu_available", "Shape", "Config", "vector",

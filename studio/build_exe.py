@@ -18,15 +18,56 @@ gpu = "--gpu" in sys.argv
 pkg = os.path.join(here, "mumaxstudio")
 icon = os.path.join(here, "packaging", "icon.ico" if os.name == "nt" else "icon.icns" if sys.platform == "darwin" else "icon.png")
 
+def _version():
+    import re
+
+    with open(os.path.join(pkg, "__init__.py"), encoding="utf-8") as f:
+        m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+    return m.group(1) if m else "0.0.0"
+
+
+def _write_version_file():
+    """Windows VERSIONINFO resource. Executables without company / product / description fields look like
+    throw-away droppers to antivirus heuristics; a complete resource is one of the cheap ways to look normal."""
+    v = [int(x) for x in (_version().split(".") + ["0", "0", "0"])[:4] if x.isdigit()] + [0, 0, 0, 0]
+    t = tuple(v[:4])
+    path = os.path.join(here, "build", "version_info.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    s = ".".join(map(str, t))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={t}, prodvers={t}, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040904B0', [
+      StringStruct('CompanyName', 'mumax Studio contributors'),
+      StringStruct('FileDescription', 'mumax Studio micromagnetic simulator'),
+      StringStruct('FileVersion', '{s}'),
+      StringStruct('InternalName', 'mumax-studio'),
+      StringStruct('LegalCopyright', 'GPL-3.0-or-later; mumax3 (c) Arne Vansteenkiste and contributors'),
+      StringStruct('OriginalFilename', 'mumax-studio.exe'),
+      StringStruct('ProductName', 'mumax Studio'),
+      StringStruct('ProductVersion', '{s}')])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+""")
+    return path
+
+
 args = [
     sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--name", "mumax-studio",
     "--windowed" if os.name == "nt" or sys.platform == "darwin" else "--console",
+    # UPX-compressed executables are a classic false-positive trigger for antivirus engines: never compress
+    "--noupx",
     "--add-data", f"{os.path.join(pkg, 'web')}{sep}mumaxstudio/web",
     "--add-data", f"{os.path.join(pkg, 'examples')}{sep}mumaxstudio/examples",
     "--collect-submodules", "scipy.fft",
     "--collect-submodules", "mumaxstudio",
-    "--exclude-module", "tkinter", "--exclude-module", "matplotlib",
+    "--hidden-import", "matplotlib.backends.backend_agg",
+    "--exclude-module", "tkinter",
 ]
+if os.name == "nt":
+    args += ["--version-file", _write_version_file()]
 if os.path.isfile(icon):
     args += ["--icon", icon]
 try:

@@ -58,12 +58,43 @@ class _RegionParam(CaseInsensitive):
         self._lut = None
         self._zero_ver = -1
         self._zero = True
+        self._cells = []  # cell-wise overrides: (host mask (nz,ny,nx), host values (nz,ny,nx) or (3,nz,ny,nx))
 
     # --- user API -------------------------------------------------------------
     def set(self, value):
         value = _wrap(self._conv(value))
         self._vals = [value] * NREGION
+        self._cells = []
         self._changed()
+
+    def set_cells(self, mask, values):
+        """Cell-wise values inside a mask (spatially varying parameters, as mumax+ Parameter.set(array)).
+        Exchange-type parameters (Aex, Dind, Dbulk) are region-wise only."""
+        if self.name in ("Aex", "Dind", "Dbulk"):
+            raise NotImplementedError(f"{self.name} can only vary per region; use regions instead of a cell array")
+        mask = np.asarray(mask, dtype=bool)
+        vals = np.asarray(values, dtype=np.float64)
+        self._cells = [(m, v) for m, v in self._cells if (m & ~mask).any()]
+        self._cells.append((mask, vals))
+        self._changed()
+
+    def _apply_cells(self, res):
+        sim = self.sim
+        shape = sim.mesh.shape
+        if self.ncomp == 1:
+            arr = np.full(shape, res) if isinstance(res, float) else np.array(sim.be.to_numpy(res), dtype=np.float64)
+            for m, v in self._cells:
+                arr[m] = np.broadcast_to(v, shape)[m]
+        else:
+            arr = np.empty((3,) + shape)
+            if isinstance(res, tuple):
+                for c in range(3):
+                    arr[c] = res[c]
+            else:
+                arr[:] = sim.be.to_numpy(res)
+            for m, v in self._cells:
+                arr[:, m] = np.broadcast_to(v, (3,) + shape)[:, m]
+        return sim.be.asarray(arr)
 
     Set = set
 
@@ -90,7 +121,7 @@ class _RegionParam(CaseInsensitive):
     def is_zero(self):
         if not self._td and self._zero_ver == self.version:
             return self._zero
-        z = not np.any(self.lut())
+        z = not np.any(self.lut()) and not any(np.any(v) for _, v in self._cells)
         if not self._td:
             self._zero_ver, self._zero = self.version, z
         return z
@@ -174,7 +205,7 @@ class ScalarParam(_RegionParam):
             return self._cache
         lut = self.lut()
         used = sim.used_regions()
-        key = (lut[used].tobytes(), sim.regions_version)
+        key = (lut[used].tobytes(), sim.regions_version, self.version if self._cells else 0)
         if key == self._cache_key:
             return self._cache
         u = lut[used]
@@ -182,6 +213,8 @@ class ScalarParam(_RegionParam):
             res = float(u[0])
         else:
             res = sim.be.asarray(lut)[sim.regions_dev]
+        if self._cells:
+            res = self._apply_cells(res)
         self._cache_key, self._cache, self._fast_key = key, res, fk
         return res
 
@@ -207,7 +240,7 @@ class VectorParam(_RegionParam):
             return self._cache
         lut = self.lut()  # (3,256)
         used = sim.used_regions()
-        key = (lut[:, used].tobytes(), sim.regions_version)
+        key = (lut[:, used].tobytes(), sim.regions_version, self.version if self._cells else 0)
         if key == self._cache_key:
             return self._cache
         u = lut[:, used]
@@ -216,6 +249,8 @@ class VectorParam(_RegionParam):
         else:
             d = sim.be.asarray(lut)
             res = d[:, sim.regions_dev]
+        if self._cells:
+            res = self._apply_cells(res)
         self._cache_key, self._cache, self._fast_key = key, res, fk
         return res
 

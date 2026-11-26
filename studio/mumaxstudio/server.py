@@ -24,9 +24,42 @@ from urllib.parse import parse_qs, quote, urlparse
 import numpy as np
 
 from . import __version__
-from .backend import Backend, _cupy_status
+from .backend import Backend, _cupy_status, list_devices
 from .script import ScriptError, run_source
 from .simulation import Control, Simulation, SimulationStopped
+from . import plus
+
+plus.install_alias()
+
+
+def _prepare_matplotlib(out_dir, log):
+    """Scripts run on a worker thread without a window: draw with Agg and turn plt.show() into PNG files in the
+    output directory, which the Files panel lists."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+    except Exception:  # matplotlib not installed: scripts that need it fail with a clear ImportError
+        return
+    if getattr(plt.show, "_studio", False):
+        plt.show.__dict__["out_dir"] = out_dir
+        plt.show.__dict__["log"] = log
+        plt.show.__dict__["count"] = 0     # each run numbers its figures from figure_001
+        return
+
+    def show(*args, **kwargs):
+        d = show.out_dir
+        os.makedirs(d, exist_ok=True)
+        for num in plt.get_fignums():
+            fig = plt.figure(num)
+            show.count += 1
+            path = os.path.join(d, f"figure_{show.count:03d}.png")
+            fig.savefig(path, dpi=130, bbox_inches="tight")
+            show.log(f"// figure saved: {os.path.basename(path)}")
+        plt.close("all")
+
+    show._studio, show.out_dir, show.log, show.count = True, out_dir, log, 0
+    plt.show = show
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
@@ -68,6 +101,25 @@ class Job:
         self.ns = None
         self.thread = None
         self.evals_hist = []  # (wall time, NEvals) for speed estimate
+        self.worlds = []      # mumax+ style World objects created by the script
+
+    @property
+    def view(self):
+        """The simulation the viewer and status show: the script's own mumax3-style simulation, or the most
+        recent mumax+ World once it has been built."""
+        for w in reversed(self.worlds):
+            v = w._system if w._system is not None else w._sim
+            if v is not None and v.mesh is not None:
+                return v
+        return self.sim
+
+    def _world_hook(self, world):
+        world._backend = self.sim.be
+        world._precision = self.sim.be.precision
+        world._log = self.append_log
+        world._control = self.control
+        world._out_dir = self.out_dir
+        self.worlds.append(world)
 
     def _clean_out_dir(self):
         d = self.out_dir
@@ -98,6 +150,9 @@ class Job:
 
         def work():
             self.state = "running"
+            plus._WORLD_HOOK = self._world_hook
+            if lang == "py":
+                _prepare_matplotlib(self.out_dir, self.append_log)
             try:
                 self.ns = run_source(self.sim, src, filename=fname, lang=lang, namespace=self.ns,
                                      out=self.append_log)
@@ -197,6 +252,89 @@ class Studio:
         cp, info = _cupy_status()
         self.gpu = {"available": cp is not None, "info": info}
         self.cpu_name = Backend("cpu").device_name
+        self.devices = list_devices()
+        self.native = False   # True inside the desktop window (pywebview): downloads go through a save dialog
+
+    # ---------------------------------------------------------------- settings (device, precision, ...)
+    SETTINGS_KEYS = ("device", "precision", "theme", "layout", "assistant_backend")
+
+    def settings(self):
+        from .assistant import _load_cfg
+
+        cfg = _load_cfg().get("studio", {})
+        return {k: cfg[k] for k in self.SETTINGS_KEYS if k in cfg}
+
+    def api_settings(self, q, body):
+        from .assistant import _load_cfg, _save_cfg
+
+        cfg = _load_cfg()
+        st = cfg.setdefault("studio", {})
+        for k in self.SETTINGS_KEYS:
+            if k in body:
+                v = body[k]
+                if k == "layout" and len(json.dumps(v)) > 20000:
+                    raise ValueError("layout too large")
+                st[k] = v
+        _save_cfg(cfg)
+        return {"ok": True, "settings": self.settings()}
+
+    def _resolve_device(self, dev):
+        """Menu id ('auto', 'cpu', 'gpu:N') -> Backend kind, refusing devices that failed their self-test."""
+        dev = (dev or self.backend or "auto").lower()
+        known = {d["id"]: d for d in self.devices}
+        if dev in ("gpu", "cuda"):
+            good = [d for d in self.devices if d["id"].startswith("gpu:") and d["ok"]]
+            if not good:
+                raise RuntimeError("no usable GPU: " + self.gpu["info"])
+            dev = good[0]["id"]
+        if dev.startswith("gpu:"):
+            d = known.get(dev)
+            if d is None:
+                raise RuntimeError(f"{dev} is not present on this computer")
+            if not d["ok"]:
+                raise RuntimeError(f"{d['name']} cannot be used: {d['note']}")
+        elif dev not in ("auto", "cpu"):
+            raise ValueError(f"unknown device {dev!r}")
+        return dev
+
+    # ---------------------------------------------------------------- Claude assistant
+    def api_assistant_status(self, q, body):
+        from . import assistant
+
+        return assistant.status()
+
+    def api_assistant_key(self, q, body):
+        from . import assistant
+
+        assistant.set_api_key(str(body.get("key", "")))
+        return assistant.status()
+
+    def api_assistant_connect(self, q, body):
+        from . import assistant
+
+        try:
+            if body.get("target") == "desktop":
+                return assistant.connect_claude_desktop()
+            if body.get("target") == "code":
+                return assistant.connect_claude_code()
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
+        raise ValueError("target must be desktop or code")
+
+    def api_assist(self, q, body):
+        from . import assistant
+
+        log = ""
+        if body.get("include_log") and self.job is not None:
+            with self.job.lock:
+                log = "\n".join(t for _, t in self.job.log[-60:])
+        try:
+            return assistant.ask(mode=str(body.get("mode", "generate")), request=str(body.get("request", "")),
+                                 script=str(body.get("script", "")), lang=str(body.get("lang", "mx3")),
+                                 error=str(body.get("error", "") or ""), log=log,
+                                 backend=str(body.get("backend", "auto")))
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
 
     # ---------------------------------------------------------------- API handlers
     def api_info(self, q, body):
@@ -205,6 +343,7 @@ class Studio:
             "gpu": self.gpu, "cpu": self.cpu_name, "default_backend": self.backend or "auto",
             "examples": list_examples(),
             "initial_script": self.initial_script,
+            "devices": self.devices, "settings": self.settings(), "native": self.native,
         }
 
     def api_example(self, q, body):
@@ -225,8 +364,10 @@ class Studio:
         # keep a copy of the script next to its output
         with open(os.path.join(self.workspace, name + (".py" if lang == "py" else ".mx3")), "w", encoding="utf-8") as f:
             f.write(text)
-        backend = body.get("backend") or self.backend
+        backend = self._resolve_device(body.get("device") or body.get("backend"))
         precision = body.get("precision") or self.precision
+        if precision not in ("single", "double"):
+            raise ValueError("precision must be single or double")
         self.job = Job(self, name, text, lang, backend, precision)
         self.job.append_log(f"// backend: {self.job.sim.be.device_name} ({self.job.sim.be.precision} precision)")
         self.job.append_log(f"// output directory: {self.job.out_dir}")
@@ -269,7 +410,7 @@ class Studio:
         rows_from = int(q.get("rows", ["0"])[0])
         with j.lock:
             log = [l for l in j.log if l[0] > since]
-        sim = j.sim
+        sim = j.view
         st = sim.status()
         paused = j.control.paused.is_set() and j.running
         hdr = sim.table_header
@@ -286,7 +427,7 @@ class Studio:
     def api_field(self, q, body):
         """Binary field slice: 4-byte header length, JSON header, float32 data, uint8 geometry mask."""
         j = self._need_job()
-        sim = j.sim
+        sim = j.view
         if sim.mesh is None:
             raise RuntimeError("mesh not defined yet")
         name = q.get("q", ["m"])[0]
@@ -325,6 +466,43 @@ class Studio:
         hb += b" " * pad
         return b"".join([struct.pack("<I", len(hb)), hb, np.ascontiguousarray(sl).tobytes(),
                          np.ascontiguousarray(geom, dtype=np.uint8).tobytes()])
+
+    def api_field3d(self, q, body):
+        """Whole 3D field for the WebGL viewer, strided so that at most `max` cells are sent.
+        Binary: 4-byte header length, JSON header, float32 (ncomp, nz, ny, nx), uint8 geometry (nz, ny, nx)."""
+        j = self._need_job()
+        sim = j.view
+        if sim.mesh is None:
+            raise RuntimeError("mesh not defined yet")
+        name = q.get("q", ["m"])[0]
+        maxcells = max(1000, min(int(q.get("max", ["262144"])[0]), 2_000_000))
+        if name == "m":
+            data, unit = sim.be.to_numpy(sim.m), ""
+        else:
+            def grab():
+                qq = sim.quantity(name)
+                return sim.be.to_numpy(qq.eval()), qq.unit
+            data, unit = j.call_in_worker(grab)
+        data = np.asarray(data, dtype=np.float32)
+        if data.ndim == 3:
+            data = data[None]
+        geom = np.asarray(sim.geom, dtype=bool)
+        nz, ny, nx = data.shape[1:]
+        s = 1
+        while (-(-nx // s)) * (-(-ny // s)) * nz > maxcells and s < max(nx, ny):
+            s += 1
+        sz = 1
+        while (-(-nx // s)) * (-(-ny // s)) * (-(-nz // sz)) > maxcells and sz < nz:
+            sz += 1
+        data = np.ascontiguousarray(data[:, ::sz, ::s, ::s])
+        geom = np.ascontiguousarray(geom[::sz, ::s, ::s], dtype=np.uint8)
+        cell = list(sim.mesh.cell)
+        hdr = {"name": name, "unit": unit, "ncomp": int(data.shape[0]), "nx": int(data.shape[3]),
+               "ny": int(data.shape[2]), "nz": int(data.shape[1]), "stride": [s, s, sz], "n": list(sim.mesh.n),
+               "cell": [cell[0] * s, cell[1] * s, cell[2] * sz], "t": float(sim.time)}
+        hb = json.dumps(hdr).encode()
+        hb += b" " * ((-(4 + len(hb))) % 4)
+        return b"".join([struct.pack("<I", len(hb)), hb, data.tobytes(), geom.tobytes()])
 
     def api_files(self, q, body):
         out = []
@@ -451,6 +629,9 @@ class Studio:
         ("GET", "/api/field"): "api_field", ("GET", "/api/files"): "api_files", ("GET", "/api/file"): "api_file",
         ("POST", "/api/delete"): "api_delete", ("GET", "/api/ovf"): "api_ovf_preview",
         ("POST", "/api/preview_geom"): "api_preview_geom", ("POST", "/api/upload"): "api_upload",
+        ("GET", "/api/field3d"): "api_field3d", ("POST", "/api/settings"): "api_settings", ("GET", "/api/assistant"): "api_assistant_status",
+        ("POST", "/api/assistant/key"): "api_assistant_key", ("POST", "/api/assist"): "api_assist",
+        ("POST", "/api/assistant/connect"): "api_assistant_connect",
     }
 
 
@@ -551,6 +732,65 @@ def make_handler(studio, allowed_hosts):
     return Handler
 
 
+class NativeBridge:
+    """Called from the page as window.pywebview.api.*. An embedded WebView does not reliably handle
+    <a download> or blob: links, so the desktop app saves files through the system save dialog instead."""
+
+    def __init__(self, studio):
+        self._studio = studio
+        self.window = None
+
+    def _ask_path(self, name):
+        import webview
+
+        ext = os.path.splitext(name)[1].lstrip(".") or "*"
+        types = (f"{ext.upper()} file (*.{ext})", "All files (*.*)") if ext != "*" else ("All files (*.*)",)
+        res = self.window.create_file_dialog(webview.SAVE_DIALOG, directory=os.path.expanduser("~"),
+                                             save_filename=name, file_types=types)
+        if not res:
+            return None
+        return res if isinstance(res, str) else res[0]
+
+    def save_text(self, name, text):
+        p = self._ask_path(os.path.basename(str(name)))
+        if not p:
+            return ""
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(str(text))
+        return p
+
+    def save_base64(self, name, data):
+        import base64
+
+        p = self._ask_path(os.path.basename(str(name)))
+        if not p:
+            return ""
+        with open(p, "wb") as f:
+            f.write(base64.b64decode(str(data)))
+        return p
+
+    def save_workspace_file(self, rel):
+        src = self._studio._safe_path(str(rel))
+        if not os.path.isfile(src):
+            raise FileNotFoundError(rel)
+        p = self._ask_path(os.path.basename(src))
+        if not p:
+            return ""
+        shutil.copyfile(src, p)
+        return p
+
+    def open_folder(self, rel=""):
+        p = self._studio._safe_path(str(rel)) if rel else self._studio.workspace
+        if os.path.isfile(p):
+            p = os.path.dirname(p)
+        if sys.platform == "win32":
+            os.startfile(p)  # noqa: S606 - a folder inside the workspace
+        else:
+            import subprocess
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", p])
+        return p
+
+
 def serve(host="127.0.0.1", port=35367, script=None, backend=None, precision="single", open_browser=True,
           native=False, workspace=None):
     workspace = workspace or os.path.join(os.path.expanduser("~"), "mumax-studio")
@@ -589,7 +829,12 @@ def serve(host="127.0.0.1", port=35367, script=None, backend=None, precision="si
             try:
                 import webview  # pywebview: Edge WebView2 on Windows, WebKit on macOS, GTK/Qt on Linux
 
-                webview.create_window("mumax Studio", url, width=1500, height=950, min_size=(900, 600))
+                webview.settings["ALLOW_DOWNLOADS"] = True
+                studio.native = True
+                bridge = NativeBridge(studio)
+                win = webview.create_window("mumax Studio", url, width=1500, height=950, min_size=(900, 600),
+                                            js_api=bridge)
+                bridge.window = win
                 webview.start()  # blocks until the window is closed
                 return
             except Exception as e:  # not installed, or no GUI toolkit on this system

@@ -40,6 +40,7 @@ jobs:
     defaults: { run: { working-directory: studio } }
     env:
       VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+      SIGN: ${{ secrets.AZURE_CLIENT_ID != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,15 +48,42 @@ jobs:
       - name: Install build dependencies
         shell: bash
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Compile PyInstaller's bootloader here instead of using the prebuilt one. The stock bootloader is shared
+            # by countless unrelated (some malicious) programs, so antivirus engines flag it by signature.
+            PYINSTALLER_COMPILE_BOOTLOADER=1 pip install --no-binary pyinstaller pyinstaller
+          else
+            pip install pyinstaller
+          fi
           if [ "$RUNNER_OS" != "Linux" ]; then pip install pywebview; fi
-          if [ "${{ matrix.edition }}" = "-nvidia" ]; then pip install cupy-cuda12x; fi
+          # [ctk] brings the CUDA runtime compiler (NVRTC) and cuFFT; without them CuPy sees the GPU but fails on
+          # the first kernel, which made the GPU entry in the device menu useless on machines without the toolkit
+          if [ "${{ matrix.edition }}" = "-nvidia" ]; then pip install "cupy-cuda12x[ctk]"; fi
       - name: Build app
         shell: bash
         run: python build_exe.py ${{ matrix.edition == '-nvidia' && '--gpu' || '' }}
       - name: Smoke test
         if: runner.os == 'Linux'
         run: ./dist/mumax-studio/mumax-studio info
+
+      # Code signing (Windows). Runs only when the repository has the Azure Trusted Signing secrets; see
+      # studio/packaging/SIGNING.md. Signed files stop SmartScreen's "unknown publisher" warning.
+      - name: Sign executables
+        if: runner.os == 'Windows' && env.SIGN == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\studio\dist\mumax-studio
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Package (Windows installer + portable zip)
         if: runner.os == 'Windows'
@@ -67,6 +95,21 @@ jobs:
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           & $iscc "/DAppVersion=$v" "/DEdition=${{ matrix.edition }}" packaging\installer.iss
           Compress-Archive -Path dist\mumax-studio -DestinationPath "dist\mumax-studio-windows${{ matrix.edition }}-portable.zip"
+      - name: Sign installer
+        if: runner.os == 'Windows' && env.SIGN == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\studio\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - name: Package (Linux tarball)
         if: runner.os == 'Linux'
         shell: bash
@@ -99,6 +142,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
+      - name: Checksums
+        run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
@@ -107,4 +152,6 @@ jobs:
             **Windows:** run `mumax-studio-windows-setup.exe` (or unzip the portable build).
             **Linux:** unpack the `.tar.gz` and run `./install-linux.sh`, or start `mumax-studio/mumax-studio` directly.
             **macOS (Apple silicon):** unzip and open `mumax-studio.app` (right-click → Open the first time; the app is not notarised).
-            The `-nvidia` builds include CuPy for NVIDIA GPUs and need a recent NVIDIA driver plus the CUDA 12 toolkit; all builds run on the CPU everywhere.
+            The `-nvidia` builds include CuPy and the CUDA 12 runtime for NVIDIA GPUs; they need only a recent NVIDIA driver (525 or newer). All builds also run on the CPU.
+            `SHA256SUMS.txt` lists the checksum of every file. On Windows: `Get-FileHash .\mumax-studio-windows-setup.exe`.
+            If Windows SmartScreen says "Windows protected your PC", choose **More info → Run anyway** (shown while a new release has not yet built up download reputation). Python users can avoid installers entirely: `pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"`.

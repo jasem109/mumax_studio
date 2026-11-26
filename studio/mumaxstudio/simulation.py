@@ -24,6 +24,7 @@ import numpy as np
 
 from . import configs as C
 from . import physics as P
+from . import api312
 from . import shapes as S
 from .backend import Backend
 from .constants import (BOGAKISHAMPINE, DORMANDPRINCE, EULER, FEHLBERG, FIXEDLAYER_BOTTOM, FIXEDLAYER_TOP, GAMMA0,
@@ -103,8 +104,10 @@ class Magnetization(FieldQuantity):
         sim.set_m_array(m)
 
     def GetCell(self, ix, iy, iz):
+        from .extensions import Vec
+
         m = self.sim.be.to_numpy(self.sim.m[:, int(iz), int(iy), int(ix)])
-        return tuple(float(c) for c in m)
+        return Vec(*[float(c) for c in m])
 
     def SetArray(self, arr):
         self.sim.set_m_array(np.asarray(arr))
@@ -169,6 +172,8 @@ class Simulation(CaseInsensitive):
         self._define_parameters()
         self._define_quantities()
         d["thermal"] = P.ThermalField(self)
+        from . import api312
+        api312.install(self)
         d["_initialised"] = True
 
     # ================================================================== definitions
@@ -646,6 +651,8 @@ class Simulation(CaseInsensitive):
         if not self.Aex.is_zero() or self._exchange_mode() != "none":
             P.exchange_dmi(self, m, B, self._exchange_mode())
         P.anisotropy(self, m, B)
+        if api312.mel_active(self):
+            B = B + api312.b_mel(self, m)
         if not self.B_ext.is_zero():
             B = B + self._b_ext() * self._geomf_dev
         if self.field_terms:
@@ -861,13 +868,16 @@ class Simulation(CaseInsensitive):
         return -self.mesh.cell_volume * self._dotsum(mf, self.thermal.field())
 
     def total_energy(self):
-        return self.E_demag() + self.E_exch() + self.E_anis() + self.E_zeeman() + self.E_therm() + self.E_custom()
+        return (self.E_demag() + self.E_exch() + self.E_anis() + self.E_zeeman() + self.E_therm() + self.E_custom()
+                + api312.e_mel(self))
 
     def energy_density(self):
         m = self.m
         mf = m * self.Msat.value()
         e = -0.5 * P.dot(mf, self.b_demag(m)) - 0.5 * P.dot(mf, self.b_exch(m))
         e = e + P.anisotropy_energy_density(self, m)
+        if api312.mel_active(self):
+            e = e + api312.edens_mel(self, m)
         if not self.B_ext.is_zero():
             e = e - P.dot(mf, self._b_ext() * self._geomf_dev)
         if self.field_terms:
@@ -967,6 +977,9 @@ class Simulation(CaseInsensitive):
 
     def _step(self):
         self.check_control()
+        if self.time + self.dt > self.alarm and not self.FixDt:
+            # never step past the end of Run(): shorten this step (the step size adapts back afterwards)
+            self.__dict__["dt"] = max(self.alarm - self.time, 1e-20)
         ok = self.stepper.step(self)
         if ok:
             for f in self.post_step:
@@ -1003,13 +1016,15 @@ class Simulation(CaseInsensitive):
 
     def Relax(self):
         self.sanity_check()
-        relax(self)
+        ok = relax(self)
         self.notify(force=True)
+        return ok
 
     def Minimize(self):
         self.sanity_check()
-        minimize(self)
+        ok = minimize(self)
         self.notify(force=True)
+        return ok
 
     def ThermSeed(self, seed):
         self.thermal.set_seed(seed)

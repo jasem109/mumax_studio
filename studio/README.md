@@ -15,6 +15,17 @@ repository and rewritten in Python.
   masks, and takes your own Python `inside(x, y, z)` code.
 * **Any drive.** Fields, spin-transfer and spin-orbit currents are built from terms: amplitude × waveform × spatial
   profile, with a library of pulse shapes, a live waveform/spectrum preview and custom Python field terms.
+* **mumax+ scripts.** `from mumaxplus import World, Grid, Ferromagnet` works: a reimplementation of the mumax+ Python
+  interface (ferromagnets, two-sublattice antiferro-/ferrimagnets) on the same engine.
+* **3D viewer for OVF files**, in the spirit of mumax-view: arrows, cones or cells, slicing, orbiting, time series,
+  OVF 1/2 from the workspace or dragged in from anywhere.
+* **Dockable panels**: resize, minimise, maximise, close, drag next to each other; the layout is remembered.
+* **Claude assistant**: with a Claude Pro/Max subscription (via Claude Code) or an API key, describe a simulation
+  and get a script, or have one fixed, explained or reviewed. A built-in MCP server lets Claude Desktop / Claude
+  Code run simulations themselves.
+
+A tutorial book (PDF) covers everything from installation to advanced use: `../docs/book/mumax-studio-book.pdf`.
+Known problems are listed in the [top-level README](../README.md#known-problems-read-before-using-results).
 
 ## Download
 
@@ -28,9 +39,16 @@ everything else, so there is nothing more to install:
 | Windows, no install | `mumax-studio-windows-portable.zip` | unzip, start `mumax-studio.exe` |
 | Linux x86-64 | `mumax-studio-linux.tar.gz` | unpack, run `./install-linux.sh` (menu entry + `mumax-studio` command) |
 | macOS, Apple silicon | `mumax-studio-macos-arm64.zip` | unzip, right-click `mumax-studio.app` → Open |
-| NVIDIA GPU | the `-nvidia` builds | include CuPy; need an NVIDIA driver and the CUDA 12 toolkit |
+| NVIDIA GPU | the `-nvidia` builds | include CuPy and the CUDA runtime; need only an NVIDIA driver (525+) |
 
 The app opens in its own window. Your scripts and results go to `~/mumax-studio`.
+
+If Windows says "Windows protected your PC": the installer is not code-signed yet. Choose **More info → Run anyway**,
+or first compare `Get-FileHash <file>` with `SHA256SUMS.txt` on the release page. Or skip installers entirely:
+
+```bash
+pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"
+```
 
 ## Install from source
 
@@ -56,7 +74,7 @@ mumax-studio                  # GUI
 
 | GPU | install |
 |---|---|
-| NVIDIA, CUDA 12 driver | `pip install cupy-cuda12x` |
+| NVIDIA, CUDA 12 driver | `pip install "cupy-cuda12x[ctk]"` (`[ctk]` brings NVRTC + cuFFT; without it the GPU is listed but fails) |
 | NVIDIA, CUDA 11 driver | `pip install cupy-cuda11x` |
 | AMD, ROCm (Linux) | `pip install cupy-rocm-5-0` (see cupy.dev for your ROCm version) |
 
@@ -71,6 +89,8 @@ python -m mumaxstudio run a.mx3 b.mx3          # headless, like `mumax3 a.mx3`; 
 python -m mumaxstudio run sim.mx3 --backend gpu --precision double
 python -m mumaxstudio info                     # available devices
 python -m mumaxstudio convert m000010.ovf --png --csv --npy
+python -m mumaxstudio bench                    # time per step vs mesh size, every CPU/GPU engine -> bench.csv/.png
+python -m mumaxstudio mcp                      # MCP server (stdin/stdout) for Claude Desktop / Claude Code
 ```
 
 GUI options:
@@ -89,7 +109,7 @@ iscc packaging/installer.iss     # Windows installer, needs Inno Setup 6
 ```
 
 PyInstaller builds for the OS it runs on. The workflow in `.github/workflows/release.yml` builds the Windows, Linux
-and macOS packages on GitHub's machines. Push a tag (`git tag v0.2.2 && git push origin v0.2.2`) and the installers
+and macOS packages on GitHub's machines. Push a tag (`git tag v0.3.0 && git push origin v0.3.0`) and the installers
 are attached to a new release a few minutes later.
 
 ## Using the GUI
@@ -250,6 +270,34 @@ sim.Relax()
 print(sim.m_q.Average())
 ```
 
+### mumax+ scripts
+
+```python
+from mumaxplus import World, Grid, Ferromagnet
+world = World(cellsize=(500e-9/128, 125e-9/32, 3e-9))
+magnet = Ferromagnet(world, Grid((128, 32, 1)))
+magnet.msat = 800e3; magnet.aex = 13e-12; magnet.alpha = 0.02
+magnet.magnetization = (1, 0.1, 0)
+magnet.minimize()
+print(magnet.magnetization.average())
+```
+
+Such scripts run as plain Python (no mumax3 names injected). In the GUI, `plt.show()` saves `figure_NNN.png` into the
+output folder, and the viewers follow the mumax+ world. Verified unchanged against the mumax+ repository examples:
+standard problem 4, anisotropy, LL torque, MRAM bit switching, skyrmion racetrack, Voronoi grains,
+antiferromagnetic resonance, periodic BC, multilayer. Not available: NcAfm, altermagnets, elastodynamics, the
+Poisson solver, moving windows, inter-sublattice DMI.
+
+### Claude
+
+* **Subscription (Pro/Max):** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once and
+  sign in, then press *Check again* in the Claude panel.
+* **API key:** paste it in the panel (stored in `~/.mumaxstudio/config.json`, user-only) or set `ANTHROPIC_API_KEY`;
+  pip installs also need `pip install anthropic`.
+* **Let Claude run simulations:** *Connect Claude Desktop* / *Connect Claude Code* in the panel, or
+  `claude mcp add --scope user mumax-studio -- mumax-studio mcp`. Tools: `run_simulation`, `describe_api`,
+  `list_examples`, `read_example`, `list_outputs`, `read_table`, `render_ovf`, `system_info`.
+
 ## Validation
 
 `python -m unittest discover -s tests -v` checks the engine against analytical results: the Newell demag tensor,
@@ -278,23 +326,23 @@ the results were checked against physics instead:
 
 ## Performance
 
-Measured CPU speed (Ryzen 5 7520U, 8 threads, single precision, demag + exchange + DMI):
+`mumax-studio bench`, Ryzen 5 7520U (8 threads), permalloy film, exchange + demag, Dormand–Prince step:
 
-| cells | time per torque evaluation |
-|---|---|
-| 64 × 64 | ≈ 1.7 ms |
-| 256 × 256 | ≈ 22 ms |
+| mesh | float32 | float64 | float32, 1 FFT thread |
+|---|---|---|---|
+| 64 × 64 | 4.5 ms | 7.0 ms | 6.3 ms |
+| 256 × 256 | 133 ms | 341 ms | 154 ms |
+| 1024 × 1024 | 3.5 s | 6.5 s | – |
 
-The CPU backend suits small and medium problems, up to roughly 10⁵ cells. A CuPy GPU is expected to be
-one to two orders of magnitude faster on large meshes, but it has not been measured yet. Demag kernels are cached in
+The CPU backend suits problems up to roughly 10⁵ cells; extra FFT threads barely help because the single-threaded
+element-wise NumPy work dominates. GPU numbers have not been measured (no NVIDIA card available); run
+`mumax-studio bench` on one and the GPU curves are added to the same plot. Demag kernels are cached in
 `~/.mumaxstudio/kernels`.
 
 ## Not ported (yet)
 
-Two mumax3 features are not available:
-
-* magnetoelastic coupling (`B1`, `B2`, strain);
-* the backward-Euler solver, which is mapped to Heun.
+* 17 of the 295 mumax3 3.12 names (listed in the top-level README);
+* the backward-Euler solver, which is mapped to Heun (magneto-elastic coupling is available with rigid strain).
 
 Everything else the mumax3 examples use is implemented, including `Shift`/`ext_centerWall`, `EdgeSmooth`,
 `AddFieldTerm`, `Crop` and the MFM image.

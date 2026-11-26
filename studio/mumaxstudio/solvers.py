@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import time as _time
 
 from .constants import BOGAKISHAMPINE, DORMANDPRINCE, EULER, FEHLBERG, HEUN, RK4
 
@@ -192,10 +193,18 @@ def make_stepper(kind):
     raise ValueError(f"solver type {kind} not supported (use 1=Euler, 2=Heun, 3=RK23, 4=RK4, 5=RK45)")
 
 
+class _WallClock(Exception):
+    pass
+
+
 def relax(sim):
-    """Port of mumax3 Relax(): precession-free RK23 until energy, then torque, stops decreasing."""
+    """Port of mumax3 Relax(): precession-free RK23 until energy, then torque, stops decreasing.
+    Returns False when RelaxWallClockTime (s, 0 = no limit) ran out first, as mumax3 3.12."""
     saved = (sim.solver_type, sim.MaxErr, sim.FixDt, sim.Precess)
     sim.log("// relaxing...")
+    limit = float(getattr(sim, "RelaxWallClockTime", 0) or 0)
+    w0 = _time.time()
+    converged = True
     try:
         sim.set_solver(BOGAKISHAMPINE, quiet=True)
         sim.FixDt = 0.0
@@ -209,6 +218,8 @@ def relax(sim):
             while sim.NSteps < stop:
                 sim.check_control()
                 sim.stepper.step(sim)
+                if limit > 0 and _time.time() - w0 > limit:
+                    raise _WallClock()
             sim.time = t_start
 
         steps(n)
@@ -241,6 +252,9 @@ def relax(sim):
                 while T1 < T0:
                     steps(n)
                     T0, T1 = T1, float((k1() * k1()).sum())
+    except _WallClock:
+        converged = False
+        sim.log("// relax stopped: RelaxWallClockTime reached")
     finally:
         sim.relaxing = False
         sim.Precess = saved[3]
@@ -248,6 +262,7 @@ def relax(sim):
         sim.MaxErr = saved[1]
         sim.set_solver(saved[0], quiet=True)
     sim.log(f"// relax done (E_total = {sim.total_energy():.6e} J)")
+    return converged
 
 
 def minimize(sim):
@@ -257,6 +272,9 @@ def minimize(sim):
     saved = sim.Precess
     sim.Precess = False
     sim.relaxing = True
+    limit = float(getattr(sim, "MinimizeWallClockTime", 0) or 0)
+    w0 = _time.time()
+    converged = False
     try:
         m = sim.m
         g = sim.torque(m)  # -m x (m x B)  (descent direction, units T)
@@ -284,14 +302,19 @@ def minimize(sim):
             if dm < sim.MinimizerStop:
                 small += 1
                 if small >= sim.MinimizerSamples:
+                    converged = True
                     break
             else:
                 small = 0
             if it % 50 == 0:
                 sim.notify()
+                if limit > 0 and _time.time() - w0 > limit:
+                    sim.log("// minimize stopped: MinimizeWallClockTime reached")
+                    break
         del xp
     finally:
         sim.Precess = saved
         sim.relaxing = False
     sim.stepper.reset()
     sim.log(f"// minimize done (E_total = {sim.total_energy():.6e} J)")
+    return converged

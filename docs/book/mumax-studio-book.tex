@@ -1,0 +1,982 @@
+\documentclass[11pt,a4paper,oneside]{book}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[scaled=0.86]{beramono}
+\usepackage{microtype}
+\usepackage[a4paper,top=28mm,bottom=30mm,inner=30mm,outer=30mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[htt]{hyphenat}
+\usepackage[hidelinks]{hyperref}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.8}
+
+\definecolor{ink}{HTML}{1F2328}
+\definecolor{rule}{HTML}{B9B4A8}
+\definecolor{codebg}{HTML}{F5F3EE}
+\definecolor{accent}{HTML}{9A3412}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{3pt}
+\renewcommand{\arraystretch}{1.15}
+
+\titleformat{\chapter}[display]{\normalfont\bfseries\Large}{\small\mdseries\scshape Chapter \thechapter}{4pt}{\LARGE}
+\titlespacing*{\chapter}{0pt}{-10pt}{24pt}
+\titleformat{\section}{\normalfont\bfseries\large}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\bfseries}{\thesubsection}{0.8em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\scshape mumax Studio}
+\fancyhead[R]{\small\nouppercase{\leftmark}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\lstdefinelanguage{mx3}{
+  morekeywords={SetGridSize,SetCellSize,SetPBC,SetGeom,DefRegion,Run,Steps,RunWhile,Relax,Minimize,
+    TableAdd,TableAutoSave,TableSave,AutoSave,Save,SaveAs,Snapshot,SetSolver,Uniform,Vortex,NeelSkyrmion,
+    TwoDomain,RandomMag,vector,Circle,Rect,Cylinder,Ellipse,Cuboid,Universe,Print,for,if,else,true,false,
+    Expect,ExpectV,Gaussian,Trapezoid,sin,cos,exp,heaviside,pi,ext_makegrains},
+  sensitive=false, morecomment=[l]{//}, morestring=[b]"
+}
+\lstset{
+  basicstyle=\ttfamily\small, columns=fullflexible, keepspaces=true,
+  backgroundcolor=\color{codebg}, frame=leftline, framerule=1.2pt, rulecolor=\color{rule},
+  xleftmargin=10pt, framexleftmargin=8pt, framesep=6pt, aboveskip=8pt, belowskip=8pt,
+  keywordstyle=\bfseries, commentstyle=\itshape\color{black!60}, stringstyle=\color{accent},
+  showstringspaces=false, breaklines=true, breakatwhitespace=true, upquote=true, literate={~}{{\textasciitilde}}1
+}
+\lstnewenvironment{mxcode}{\lstset{language=mx3}}{}
+\lstnewenvironment{pycode}{\lstset{language=Python}}{}
+\lstnewenvironment{shell}{\lstset{language=}}{}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\renewcommand{\_}{\textunderscore\allowbreak}
+\newcommand{\menu}[1]{\textsf{#1}}
+
+\newenvironment{caution}{\par\medskip\noindent\begin{minipage}{\linewidth}\setlength{\parskip}{3pt}%
+  \hrule height 0.6pt\vspace{6pt}\noindent\textbf{Caution.}\ }{\par\vspace{6pt}\hrule height 0.6pt\end{minipage}\par\medskip}
+\newenvironment{note}{\par\medskip\noindent\begin{minipage}{\linewidth}\setlength{\parskip}{3pt}%
+  \hrule height 0.3pt\vspace{6pt}\noindent\textbf{Note.}\ }{\par\vspace{6pt}\hrule height 0.3pt\end{minipage}\par\medskip}
+
+\hypersetup{pdftitle={mumax Studio: A Tutorial},pdfauthor={Mohammad Abu Jasem},pdfsubject={Micromagnetic simulation with mumax Studio}}
+
+\begin{document}
+
+\frontmatter
+\begin{titlepage}
+\vspace*{40mm}
+{\noindent\Huge\bfseries mumax Studio\par}
+\vspace{6mm}
+{\noindent\LARGE A Tutorial, from Installation to Advanced Simulation\par}
+\vspace{14mm}
+{\noindent\large Micromagnetics with mumax3 scripts, mumax+ scripts, spin-transfer and spin-orbit torques,
+on CPUs and GPUs\par}
+\vfill
+{\noindent\large Mohammad Abu Jasem\par}
+\vspace{2mm}
+{\noindent For mumax Studio \input{version.tex}\unskip, \today\par}
+\vspace{2mm}
+{\noindent\small\url{https://github.com/jasem109/mumax_studio}\quad\textperiodcentered\quad\url{https://majasem.com/mumaxUI}\par}
+\end{titlepage}
+
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+
+mumax Studio is a desktop program for micromagnetic simulation. It reimplements the mumax3 engine in Python,
+using NumPy and SciPy on the processor and CuPy on NVIDIA graphics cards, and adds a graphical interface, a
+three-dimensional viewer for OVF files, an interpreter for scripts written for mumax+, and an optional connection
+to Claude, Anthropic's language model, that writes and runs scripts on request.
+
+This book is a tutorial. Chapters~\ref{ch:install} to~\ref{ch:output} are meant to be read in order by a new user;
+they lead from installation to a first complete simulation and its analysis. Chapters~\ref{ch:python}
+to~\ref{ch:advanced} treat scripting in Python, mumax+ compatibility, performance, the Claude assistant and
+larger studies, and can be read independently. Chapter~\ref{ch:limits} lists what is known not to work. The
+reader is assumed to know the basics of micromagnetism: the Landau--Lifshitz--Gilbert equation, the exchange
+length, and the role of the demagnetising field.
+
+\begin{caution}
+mumax Studio is research software in an early state. It has known defects (Chapter~\ref{ch:limits}) and has not
+been validated as thoroughly as mumax3 or mumax+. Do not rely on it alone for results you intend to publish:
+reproduce any important result with mumax3 or mumax+.
+\end{caution}
+
+\paragraph{Typographical conventions.} Program text, file names and commands are set in \code{typewriter}.
+Interface elements are set in \menu{sans serif}. Lines beginning with \code{\$} are typed in a terminal
+(\menu{PowerShell} on Windows); the \code{\$} itself is not typed.
+
+\tableofcontents
+
+\mainmatter
+
+% =====================================================================
+\chapter{What mumax Studio is}\label{ch:intro}
+
+\section{Scope}
+
+mumax Studio solves the Landau--Lifshitz--Gilbert equation on a regular grid of rectangular cells, with the
+effective field
+\begin{equation}
+\mathbf B_\text{eff} = \mathbf B_\text{exch} + \mathbf B_\text{demag} + \mathbf B_\text{anis}
+ + \mathbf B_\text{DMI} + \mathbf B_\text{ext} + \mathbf B_\text{therm} + \mathbf B_\text{mel}
+\end{equation}
+and the torque
+\begin{equation}
+\boldsymbol\tau = -\frac{\gamma}{1+\alpha^2}\left[\mathbf m\times\mathbf B_\text{eff}
+ + \alpha\,\mathbf m\times(\mathbf m\times\mathbf B_\text{eff})\right]
+ + \boldsymbol\tau_\text{STT} + \boldsymbol\tau_\text{SOT}.
+\end{equation}
+The conventions (units, signs, boundary conditions, the order of the components in files) are those of
+mumax3. A script written for mumax3 should therefore run without changes and give the same result to within
+the tolerance of the solver.
+
+The program has four parts:
+\begin{description}
+\item[The engine] (\code{mumaxstudio} Python package). Field terms, solvers, regions, geometry, output files.
+It runs on the CPU with NumPy and SciPy, or on an NVIDIA GPU with CuPy; the same code serves both.
+\item[The script interpreters.] An interpreter for the mumax3 language (\code{.mx3} files), a Python
+environment in which every mumax3 name is defined, and a module \code{mumaxplus} that implements the mumax+
+Python interface on top of the same engine.
+\item[The interface.] A local web server and a page that the program shows in its own window: forms for the
+material, geometry and excitation, a script editor, plots, a console and a three-dimensional viewer.
+\item[The assistant.] An optional link to Claude, either through Claude Code (with a Claude Pro or Max
+subscription) or through an Anthropic API key, and a Model Context Protocol (MCP) server through which Claude
+Desktop or Claude Code can run simulations directly.
+\end{description}
+
+\section{Relation to mumax3, mumax+ and the STT--SOT fork}
+
+mumax3 is written in Go and CUDA and needs an NVIDIA GPU. The mumax3 STT--SOT fork, from which this program
+started, adds a spin-orbit torque term with the parameters \code{JSOT}, \code{SPINHALL}, \code{HFLoverHDL},
+\code{SOThickness} and \code{SOTFixedLayer}. mumax+ is a newer program from the same group, written in C++
+and CUDA with a Python interface, that adds antiferromagnets, ferrimagnets and other multi-sublattice materials.
+
+mumax Studio takes the physics of all three and runs it without a GPU. The price is speed: on a processor it is
+one to two orders of magnitude slower than mumax3 on a good graphics card (Chapter~\ref{ch:perf}). It is
+suited to teaching, to the design of a simulation before it is run at full size, to small and medium problems,
+and to machines without an NVIDIA card.
+
+% =====================================================================
+\chapter{Installation}\label{ch:install}
+
+\section{Choosing a package}
+
+Ready-made packages are published on the release page of the repository,
+\url{https://github.com/jasem109/mumax_studio/releases/latest}, and on \url{https://majasem.com/mumaxUI}. Each
+contains Python and every library the program needs.
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.21\linewidth}>{\raggedright}p{0.44\linewidth}>{\raggedright\arraybackslash}p{0.27\linewidth}}
+\toprule
+System & File & Notes \\
+\midrule
+Windows 10 or 11 & \code{mumax-studio-windows-setup.exe} & installer, no administrator rights needed \\
+Windows, NVIDIA GPU & \code{mumax-studio-windows-nvidia-setup.exe} & includes CuPy and the CUDA runtime \\
+Windows, no installation & \code{mumax-studio-windows-portable.zip} & unzip and start \code{mumax-studio.exe} \\
+Linux, x86-64 & \code{mumax-studio-linux.tar.gz} & also \code{-nvidia} \\
+macOS, Apple silicon & \code{mumax-studio-macos-arm64.zip} & CPU only \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The NVIDIA editions are larger (about one gigabyte) because they carry the CUDA libraries. They need only a
+recent NVIDIA driver (version 525 or newer); the CUDA toolkit does not have to be installed. They also run on
+the processor, so a machine without a suitable GPU loses nothing but disk space.
+
+\section{Windows}
+
+Run the installer. It installs into your user profile, creates a Start-menu entry and, if you tick the box,
+associates \code{.mx3} files with the program.
+
+\paragraph{If Windows or the browser warns about the file.} Releases are not yet signed with a code-signing
+certificate. Windows SmartScreen therefore shows \menu{Windows protected your PC} for a newly published file, and
+Microsoft Edge may report that the file is \menu{not commonly downloaded}. This is a statement about the file's
+reputation, not a detection of malicious code. To proceed, choose \menu{More info} and then \menu{Run anyway}; in
+Edge, open the download list, choose \menu{Keep} and then \menu{Keep anyway}.
+
+To confirm that the file is the one the build produced, compare its checksum with the published list
+\code{SHA256SUMS.txt} on the release page:
+\begin{shell}
+$ Get-FileHash .\mumax-studio-windows-setup.exe
+\end{shell}
+The hash printed must equal the line for that file in \code{SHA256SUMS.txt}. Section~\ref{sec:pip} describes an
+installation that uses no executable installer at all.
+
+\section{Linux}
+
+\begin{shell}
+$ tar xzf mumax-studio-linux.tar.gz
+$ cd mumax-studio-linux
+$ ./install-linux.sh
+\end{shell}
+The script copies the program to \code{\textasciitilde/.local/opt/mumax-studio}, adds a menu entry and puts a
+\code{mumax-studio} command in \code{\textasciitilde/.local/bin}. The program can also be started in place with
+\code{mumax-studio/mumax-studio}. The desktop window needs the GTK WebKit libraries
+(\code{gir1.2-webkit2-4.1} on Debian and Ubuntu); without them the interface opens in the default browser.
+
+\section{macOS}
+
+Unzip the archive and move \code{mumax-studio.app} to \menu{Applications}. The application is not notarised by
+Apple, so the first start must be made with a right click (or Control-click) and \menu{Open}. Later starts work
+normally.
+
+\section{Installation with pip}\label{sec:pip}
+
+On any system with Python 3.9 or newer the program can be installed as an ordinary Python package:
+\begin{shell}
+$ pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"
+$ mumax-studio
+\end{shell}
+For the desktop window add \code{pip install pywebview}; for the Claude assistant with an API key add
+\code{pip install anthropic}. A source checkout works the same way:
+\begin{shell}
+$ git clone https://github.com/jasem109/mumax_studio
+$ cd mumax_studio/studio
+$ pip install -r requirements.txt
+$ python -m mumaxstudio
+\end{shell}
+
+\section{GPU support}\label{sec:gpu}
+
+The GPU path uses CuPy. In the NVIDIA packages it is already present. For a pip installation choose the CuPy
+package that matches the driver:
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.3\linewidth}>{\raggedright\arraybackslash}p{0.62\linewidth}}
+\toprule
+Hardware & Command \\
+\midrule
+NVIDIA, driver for CUDA 12 & \code{pip install "cupy-cuda12x[ctk]"} \\
+NVIDIA, driver for CUDA 11 & \code{pip install "cupy-cuda11x"} (and the CUDA 11 toolkit) \\
+AMD, ROCm on Linux & \code{pip install cupy-rocm-5-0} (match the ROCm version) \\
+\bottomrule
+\end{tabular}
+\end{center}
+The suffix \code{[ctk]} installs the CUDA runtime compiler (NVRTC) and cuFFT from pip. Without it, CuPy can
+detect the card but fails as soon as it compiles its first kernel; this was the cause of a GPU that appeared in the
+device menu but could not be used.
+
+\section{Checking the installation}
+
+\begin{shell}
+$ mumax-studio info
+\end{shell}
+prints the version, the processor, and every GPU found. Each GPU is tested with a small FFT and an element-wise
+kernel; a card that fails is listed with the reason, for example a missing NVRTC library. In the packaged Windows
+program the same information is shown in the interface under the \menu{Device} menu.
+
+% =====================================================================
+\chapter{A first simulation}\label{ch:first}
+
+\section{Starting the program}
+
+Start mumax Studio from the Start menu, the application menu, or with \code{mumax-studio}. The window shows a
+narrow rail of page icons on the left, the page itself next to it, and on the right a dock of panels: the field
+viewer, the 3D viewer, the plot, the console and the Claude panel (Figure~\ref{fig:ui}). Scripts and results
+are kept in the workspace folder, \code{\textasciitilde/mumax-studio} by default.
+
+\begin{figure}[htbp]
+\centering
+\IfFileExists{fig/ui_light.jpg}{\includegraphics[width=\linewidth]{fig/ui_light.jpg}}{\fbox{\parbox[c][5cm][c]{0.9\linewidth}{\centering screenshot}}}
+\caption{The main window. Left: page rail and the Files page. Right: the dock with the field viewer, the 3D
+viewer showing a magnetization as cells, the table plot, the minimised console and the Claude panel.}
+\label{fig:ui}
+\end{figure}
+
+\section{Standard problem 4}
+
+The muMAG standard problem 4 is the usual first test of a micromagnetic code: a permalloy film of
+$500\times125\times3$\,nm$^3$ is relaxed into an S state and then reversed by a field applied at an angle. Open the
+\menu{Script} page and choose \menu{Examples} $\rightarrow$ \menu{01 standard problem 4}, or type:
+\begin{mxcode}
+SetGridSize(128, 32, 1)
+SetCellSize(500e-9/128, 125e-9/32, 3e-9)
+
+Msat  = 800e3        // A/m
+Aex   = 13e-12       // J/m
+alpha = 0.02
+
+m = Uniform(1, .1, 0)
+Relax()
+Print(m.Average())   // S state
+
+B_ext = vector(-24.6e-3, 4.3e-3, 0)
+TableAutoSave(10e-12)
+Run(1e-9)
+\end{mxcode}
+Press \menu{Run} or Ctrl+Enter. The state indicator in the top bar changes from \menu{idle} to \menu{running};
+the field viewer shows the magnetization in the mumax3 colour wheel (hue gives the in-plane direction,
+brightness the out-of-plane component) and the plot shows the columns of the table as they are written.
+
+After the relaxation the console prints approximately $\langle\mathbf m\rangle = (0.9670, 0.1253, 0)$. The
+mumax3 reference value of $\langle m_y\rangle$ is $0.12521$. During the reversal $\langle m_x\rangle$ crosses
+zero at about $0.14$\,ns, as in the published solutions.
+
+\section{Where the results are}
+
+Each run writes to \code{<name>.out/} in the workspace: \code{table.txt} (one row per saved time, tab
+separated, with the units in the header), and one OVF file for every \code{Save} or \code{AutoSave}. The
+\menu{Files} page lists these folders. For each file it offers \menu{view}, \menu{3D} (for OVF files) and
+\menu{save}, which writes a copy to a location you choose.
+
+\section{Changing parameters during a run}
+
+The console accepts any statement of the script language while a simulation runs. It is executed between two
+solver steps:
+\begin{mxcode}
+alpha = 0.5
+B_ext = vector(0, 0, 0.1)
+\end{mxcode}
+\menu{Pause} stops the solver without losing the state; \menu{Stop} ends the run.
+
+% =====================================================================
+\chapter{The window and its panels}\label{ch:ui}
+
+\section{Pages}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}l p{0.72\linewidth}}
+\toprule
+Setup & Material presets (permalloy, CoFeB, Co/Pt with DMI, YIG and others), per-region values, initial state,
+solver, temperature and the table columns. \\
+Geometry & Mesh, then a stack of shapes combined by union, difference, intersection and exclusive or. \\
+Drive & Applied field \code{B\_ext}, spin-transfer current \code{J} and spin-orbit current \code{JSOT}, each a sum of
+terms. \\
+Script & The script that the forms generate. Once edited by hand it no longer follows the forms. \\
+Files & Output folders, uploads (STL, PNG and CSV files used by shapes and waveforms). \\
+Help & A summary of the script language, the mumax+ interface, the viewer and the assistant. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Arranging the panels}
+
+The right-hand side of the window is a dock: a tree of horizontal and vertical splits whose leaves are panels.
+Every panel has a title bar with three buttons, \menu{minimise}, \menu{maximise} and \menu{close}.
+\begin{itemize}
+\item Drag a divider to change the share of two neighbours. Double-click a divider to make them equal; with a
+divider focused, the arrow keys move it.
+\item Drag a panel by its title onto another panel. Dropping on an edge places it beside that panel; dropping in
+the centre exchanges the two.
+\item Minimise reduces a panel to its title bar, or to a narrow strip in a horizontal split. Maximise lets one
+panel fill the dock; Escape restores the layout.
+\item The \menu{Panels} menu reopens closed panels and offers four arrangements: \menu{Standard},
+\menu{Viewer} (large 3D view), \menu{Analysis} (large plot) and \menu{Assistant}.
+\end{itemize}
+The layout is saved on the computer and restored at the next start, together with the chosen device, precision
+and colour theme. Figure~\ref{fig:dark} shows the dark colour theme, selected with the moon button at the right of the
+top bar.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig/ui_dark.jpg}
+\caption{The dark colour theme.}
+\label{fig:dark}
+\end{figure}
+
+\section{Device and precision}
+
+The \menu{Device} menu in the top bar lists \menu{Auto}, \menu{CPU} and every GPU found, each with its name.
+A GPU that failed its self-test is shown but disabled, with the reason beside it. The choice applies to the next
+run; the line under the menu states which device the next run will use, or which device the current run is using.
+\menu{Precision} selects single (float32) or double (float64) arithmetic. Single precision is the mumax3 default and
+is about twice as fast; double precision is advisable for energy minimisation of large, nearly uniform states and
+for very small time steps.
+
+% =====================================================================
+\chapter{The mumax3 script language}\label{ch:mx3}
+
+The language is that of mumax3: a small subset of Go with case-insensitive names. This chapter describes the
+parts that are used in nearly every simulation; the Help page lists all functions.
+
+\section{Mesh}
+\begin{mxcode}
+SetGridSize(Nx, Ny, Nz)      // number of cells
+SetCellSize(cx, cy, cz)      // metres
+SetPBC(Px, Py, Pz)           // periodic images in each direction, 0 = open
+\end{mxcode}
+Choose the cell size below the exchange length $l_\text{ex} = \sqrt{2A/(\mu_0 M_s^2)}$ (about 5\,nm for
+permalloy). Powers of two, or products of small primes, make the FFT fastest.
+
+\section{Material parameters}
+
+Parameters are assigned globally or per region:
+\begin{mxcode}
+Msat = 800e3
+Aex  = 13e-12
+Ku1  = 0.5e6;  anisU = vector(0, 0, 1)
+Dind = 1.5e-3                     // interfacial DMI, J/m^2
+DefRegion(1, Circle(50e-9))
+Msat.SetRegion(1, 1.1e6)
+ext_ScaleExchange(0, 1, 0.5)      // exchange between regions 0 and 1
+\end{mxcode}
+Any parameter can depend on time through the variable \code{t}; the expression is re-evaluated at every step:
+\begin{mxcode}
+B_ext = vector(0, 0, 0.01*sin(2*pi*1e9*t))
+\end{mxcode}
+
+\section{Initial states}
+
+\code{Uniform}, \code{Vortex(circ, pol)}, \code{NeelSkyrmion(charge, pol)}, \code{BlochSkyrmion},
+\code{TwoDomain}, \code{RandomMag} and \code{RandomMagSeed} create states; \code{.Transl}, \code{.Scale} and
+\code{.Add} move and combine them. A previous result is loaded with \code{m.LoadFile("m000010.ovf")}.
+
+\section{Running}
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{0.66\linewidth}}
+\toprule
+Run(T) & integrate the LLG equation for a time $T$ \\
+Steps(n) & take $n$ solver steps \\
+RunWhile(cond) & run while a condition holds, e.g.\ \code{RunWhile(m.comp(2).average() > 0)} \\
+Relax() & remove precession and lower the energy until the torque stops decreasing \\
+Minimize() & steepest-descent energy minimisation (faster than \code{Relax} for static states) \\
+SetSolver(k) & 1 Euler, 2 Heun, 3 Bogacki--Shampine, 4 RK4, 5 Dormand--Prince (the default); 6 (Fehlberg) is
+mapped to 5 and $-1$ (backward Euler) to Heun \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{MaxErr}, \code{MinDt}, \code{MaxDt} and \code{FixDt} control the time step as in mumax3.
+
+\section{Output}
+\begin{mxcode}
+TableAdd(E_total)           // add a column
+TableAutoSave(10e-12)       // one row every 10 ps
+AutoSave(m, 50e-12)         // an OVF file every 50 ps
+Save(B_demag)               // once, now
+SaveAs(m, "relaxed")
+Snapshot(m)                 // PNG image
+\end{mxcode}
+Any quantity can be read at a single cell with \code{GetCell}: \code{m.GetCell(10, 5, 0)} returns the vector in
+cell $(10, 5, 0)$, and \code{Msat.GetRegion(1)} the value of a parameter in a region.
+
+\section{Control flow}
+
+Loops, conditions and functions follow Go:
+\begin{mxcode}
+for B := 0.0; B <= 0.1; B += 0.01 {
+    B_ext = vector(B, 0, 0)
+    Minimize()
+    TableSave()
+}
+\end{mxcode}
+
+% =====================================================================
+\chapter{Geometry and regions}\label{ch:geometry}
+
+\section{Shapes in scripts}
+
+\code{SetGeom(shape)} restricts the magnet to a shape. The mumax3 shapes \code{Circle}, \code{Ellipse},
+\code{Rect}, \code{Square}, \code{Cylinder}, \code{Cuboid}, \code{Ellipsoid}, \code{Layers}, \code{Cell} and
+\code{ImageShape} are available, as are the additions \code{Polygon}, \code{RegularPolygon}, \code{Ring},
+\code{Sphere}, \code{Torus} and \code{STLShape}. Every shape has \code{Transl}, \code{RotX/Y/Z}, \code{Scale},
+\code{Repeat}, \code{Add}, \code{Sub}, \code{Intersect}, \code{Xor} and \code{Inverse}.
+\begin{mxcode}
+SetGeom(Circle(200e-9).Sub(Circle(100e-9)).Transl(20e-9, 0, 0))
+SetGeom(STLShape("part.stl", 1e-9))     // STL in nm, voxelised on the mesh
+EdgeSmooth = 8                          // partial-cell volumes, as in mumax3
+\end{mxcode}
+Grains are created with \code{ext\_makegrains(size, nregions, seed)}.
+
+\section{The geometry builder}
+
+The \menu{Geometry} page builds the same shapes with forms. Each entry has an operation, a transform and an
+optional region number. In the preview a shape is moved by dragging, rotated with Shift and the mouse wheel,
+scaled with Ctrl and the wheel, nudged by one cell with the arrow keys, duplicated with Shift+D and removed with
+Delete. The preview shows the engine's own rasterisation, so what is drawn is what is simulated.
+
+% =====================================================================
+\chapter{Spin-transfer and spin-orbit torques}\label{ch:torques}
+
+\section{Zhang--Li and Slonczewski torques}
+
+The spin-transfer torque of an in-plane current uses \code{J} (A/m$^2$), the polarisation \code{Pol} and the
+non-adiabaticity \code{xi}. For a perpendicular current through a fixed layer the Slonczewski form applies, with
+\code{FixedLayer}, \code{Lambda}, \code{EpsilonPrime} and \code{FreeLayerThickness}. Both follow mumax3.
+
+\section{Spin-orbit torque}
+
+The spin-orbit torque of the STT--SOT fork is
+\begin{equation}
+\boldsymbol\tau_\text{SOT} = \frac{\gamma}{1+\alpha^2}\Big[(\beta+\alpha\beta_\text{FL})\,
+ \mathbf m\times(\boldsymbol\sigma\times\mathbf m) + (\beta_\text{FL}-\alpha\beta)\,\boldsymbol\sigma\times\mathbf m\Big],
+\end{equation}
+where
+\begin{equation}
+\beta = \frac{\hbar\,\theta_\text{SH}\,J}{2e\,M_s\,d},\qquad \beta_\text{FL} = \beta\cdot\text{HFLoverHDL},
+\end{equation}
+with the parameters
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{0.7\linewidth}}
+\toprule
+JSOT & current density $J$ in the heavy metal (A/m$^2$); the $z$ component is used \\
+SPINHALL & spin Hall angle $\theta_\text{SH}$ \\
+HFLoverHDL & ratio of field-like to damping-like torque \\
+SOThickness & free-layer thickness $d$ (m); 0 means the mesh thickness \\
+SOTFixedLayer & spin polarisation direction $\boldsymbol\sigma$ \\
+DisableSOTorque & switch the term off \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Example: switching a perpendicular magnet}
+
+\begin{mxcode}
+SetGridSize(32, 32, 1)
+SetCellSize(2.5e-9, 2.5e-9, 1e-9)
+SetGeom(Circle(80e-9))
+Msat = 1.1e6;  Aex = 15e-12;  alpha = 0.05
+Ku1 = 0.9e6;   anisU = vector(0, 0, 1)
+m = Uniform(0, 0, 1)
+
+SPINHALL      = 0.3
+HFLoverHDL    = 0.2
+SOTFixedLayer = vector(0, 1, 0)
+B_ext = vector(0.02, 0, 0)                     // symmetry-breaking in-plane field
+JSOT  = vector(0, 0, 3e12*Trapezoid(t, 0.1e-9, 50e-12, 1e-9, 50e-12))
+
+TableAutoSave(5e-12)
+Run(3e-9)
+\end{mxcode}
+The anisotropy field of this film is $2K_{u1}/M_s - \mu_0 M_s \approx 0.25$\,T and the damping-like amplitude
+is $\beta \approx 0.27$\,T, so the current is above the switching threshold. During the 1\,ns pulse the
+magnetization is held close to the plane ($\langle m_z\rangle \approx 0.1$); after the pulse it falls into the
+lower energy minimum, with $\langle m_z\rangle = -0.85$ at 3\,ns and still precessing. With \code{JSOT} of the
+opposite sign the same pulse returns it to the upper state ($\langle m_z\rangle = +0.85$ at 3\,ns). At half the
+current, $1.5\times10^{12}$\,A/m$^2$, the magnet does not switch: $\langle m_z\rangle$ only dips to $0.8$.
+
+\section{Pulse shapes and spatial profiles}
+
+The drive library provides waveforms of unit height that can be multiplied into any expression:
+\code{Pulse}, \code{Step}, \code{Ramp}, \code{SmoothStep}, \code{Gaussian(t, t0, fwhm)},
+\code{Trapezoid(t, t0, rise, width, fall)}, \code{Sech}, \code{Lorentzian}, \code{SincPulse},
+\code{SquareWave}, \code{TriangleWave}, \code{Chirp}, \code{GaussianWavePacket}, \code{PulseTrain}, and
+\code{Waveform(ts, vs)} or \code{LoadWaveform("w.csv")} for measured signals. Spatial profiles restrict a term:
+\begin{mxcode}
+B_ext.Add(GaussianSpot(0, 0, 40e-9, vector(0, 0, 1)), 0.05*Gaussian(t, 0.2e-9, 50e-12))
+B_ext.Add(StripLine(-200e-9, 50e-9, vector(0, 1, 0)), 0.01*SincPulse(t, 0.1e-9, 30e9))
+\end{mxcode}
+The \menu{Drive} page builds the same terms with forms and plots each waveform, or its spectrum, over the run time.
+
+% =====================================================================
+\chapter{Results and visualisation}\label{ch:output}
+
+\section{The table}
+
+The plot panel shows any columns of \code{table.txt} against time or against another column, for the running
+simulation or a finished one. The data can be exported as CSV and the figure as PNG.
+
+\section{The field viewer}
+
+The field viewer shows one layer of any quantity: \code{m}, \code{B\_eff}, \code{B\_demag}, \code{B\_exch},
+the torques, \code{SOTorque}, energy densities, the MFM image and others, either in the colour wheel or as one
+component on a diverging scale, optionally with arrows. Hovering prints the value in the cell under the pointer.
+
+\section{The 3D viewer}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig/ui_3d.jpg}
+\caption{A series of OVF snapshots in the 3D panel, drawn as cells. The frame bar under the toolbar steps through
+the series; the Files page on the left offers \menu{3D} for every OVF file.}
+\label{fig:3d}
+\end{figure}
+
+The 3D panel draws a vector field as arrows, cones or cells in three dimensions, coloured like mumax3 (hue from
+the in-plane angle, lightness from $m_z$) or by one component. Its sources are:
+\begin{itemize}
+\item \menu{live}: the running or last simulation, refreshed during the run;
+\item \menu{workspace}: an OVF file, or a series of OVF files with the same prefix, chosen with \menu{3D} on the
+\menu{Files} page;
+\item \menu{local}: OVF files from anywhere on the computer, opened with \menu{OVF\ldots} or dropped onto the panel.
+\end{itemize}
+Local files are read in the window; they are not copied into the workspace. OVF 1 and OVF 2 are supported, in
+text, binary-4 and binary-8 encodings.
+
+The left mouse button orbits, the right button (or Shift with the left) pans, the wheel zooms. The \menu{Slice}
+menu restricts the view to ranges of $x$, $y$ and $z$ and sets the stride and the glyph size; the camera buttons
+give isometric, top, front and side views. With a series loaded, the frame bar steps through the files or plays
+them at a chosen rate. The view can be saved as a PNG image.
+
+\section{Converting files}
+
+\begin{shell}
+$ mumax-studio convert m000010.ovf --png --csv --npy
+\end{shell}
+writes an image, a CSV table of all cells and a NumPy array of shape $(n_\text{comp}, N_z, N_y, N_x)$.
+
+% =====================================================================
+\chapter{Python scripts}\label{ch:python}
+
+\section{Python with the mumax3 names}
+
+A file with the extension \code{.py} runs in the same environment as an \code{.mx3} script, so every mumax3
+name exists, and all of Python and NumPy is available:
+\begin{pycode}
+SetGridSize(64, 64, 1); SetCellSize(4e-9, 4e-9, 4e-9)
+Msat = 800e3; Aex = 13e-12; alpha = 0.02
+B_ext = lambda t: (5e-3*cos(2*pi*1e9*t), 5e-3*sin(2*pi*1e9*t), 0)
+for k in range(3):
+    Run(0.5e-9)
+    print(t, m.average())
+\end{pycode}
+Shapes and field terms may be Python functions evaluated on all cells at once:
+\begin{pycode}
+SetGeom(lambda x, y, z: (x**2 + y**2 < (50e-9)**2) & (abs(z) < 2e-9))
+
+def oersted(x, y, z, t):            # tesla
+    B = 1e-3 * Gaussian(t, 0.5e-9, 0.1e-9)
+    return (0*x, B*np.tanh(x/20e-9), 0*z)
+AddFieldTerm(oersted)
+TableAdd(B_custom)
+\end{pycode}
+
+\section{The engine as a library}
+
+\begin{pycode}
+from mumaxstudio import Simulation, Uniform
+
+sim = Simulation(backend="auto", precision="single")
+sim.SetGridSize(128, 32, 1)
+sim.SetCellSize(500e-9/128, 125e-9/32, 3e-9)
+sim.Msat = 800e3; sim.Aex = 13e-12; sim.alpha = 0.02
+sim.m = Uniform(1, .1, 0)
+sim.Relax()
+print(sim.m_q.Average())
+\end{pycode}
+\code{backend} is \code{"cpu"}, \code{"gpu"}, \code{"gpu:1"} (a particular card) or \code{"auto"}.
+
+\section{Figures}
+
+\code{matplotlib} is included. In a script run from the interface, \code{plt.show()} saves the current figure as
+\code{figure\_001.png}, \code{figure\_002.png}, \ldots{} in the output folder instead of opening a window.
+
+% =====================================================================
+\chapter{mumax+ scripts}\label{ch:plus}
+
+\section{The interface}
+
+A Python script that imports \code{mumaxplus} runs against a reimplementation of the mumax+ interface on the
+mumax Studio engine. Standard problem 4 in mumax+ form:
+\begin{pycode}
+from mumaxplus import World, Grid, Ferromagnet
+
+world = World(cellsize=(500e-9/128, 125e-9/32, 3e-9))
+magnet = Ferromagnet(world, Grid((128, 32, 1)))
+magnet.msat = 800e3
+magnet.aex = 13e-12
+magnet.alpha = 0.02
+magnet.magnetization = (1, 0.1, 0)
+magnet.minimize()
+print(magnet.magnetization.average())
+
+world.bias_magnetic_field = (-24.6e-3, 4.3e-3, 0)
+world.timesolver.run(1e-9)
+\end{pycode}
+Such a script is run as plain Python: the mumax3 names are not injected, so a variable called \code{m} does not
+collide with the magnetization of the mumax3 interpreter.
+
+\section{What is implemented}
+
+\begin{itemize}
+\item \code{World}, \code{Grid}, \code{Ferromagnet}, and the two-sublattice \code{Antiferromagnet} and
+\code{Ferrimagnet} with \code{sub1}, \code{sub2}, \code{afmex\_cell}, \code{afmex\_nn} and \code{latcon}.
+\item Parameters given as numbers, vectors, NumPy arrays, functions of position \code{f(x, y, z)} or of time;
+\code{set\_in\_region}, \code{add\_time\_term}.
+\item The DMI tensor (\code{set\_interfacial\_dmi}, \code{set\_bulk\_dmi}), \code{inter\_exchange} and
+\code{scale\_exchange} between regions.
+\item Rigid magneto-elastic strain (\code{B1}, \code{B2}, \code{rigid\_norm\_strain},
+\code{rigid\_shear\_strain}); Zhang--Li and Slonczewski torques; temperature.
+\item \code{world.timesolver} with \code{run}, \code{steps}, \code{run\_while}, \code{solve}, \code{time},
+\code{timestep}, \code{adaptive\_timestep}, \code{max\_error}, \code{headroom} and \code{set\_method};
+\code{relax} and \code{minimize}.
+\item Field and energy quantities, including the energy densities of each term; \code{.eval()} returns a NumPy
+array of shape $(n_\text{comp}, N_z, N_y, N_x)$ and \code{.average()} a tuple.
+\item The \code{mumaxplus.util} helpers: shapes, \code{VoronoiTessellator}, \code{neelskyrmion},
+\code{vortex}, \code{twodomain}, \code{plot\_field}, \code{show\_layer} and \code{show\_regions}.
+\end{itemize}
+
+\section{Verification}
+
+The following examples from the mumax+ repository were run unchanged and gave the physically expected results:
+standard problem 4, anisotropy, the LL torque example, MRAM bit switching, the skyrmion racetrack, Voronoi
+grains, antiferromagnetic resonance, periodic boundary conditions and the multilayer example. The comparison is
+qualitative where the mumax+ repository publishes figures rather than numbers. The sign convention of the DMI of
+mumax+ could not be compared with mumax+ itself, which needs an NVIDIA GPU; it follows the mumax+ documentation.
+
+\section{What is missing}
+
+Non-collinear antiferromagnets (\code{NcAfm}), altermagnets, elastodynamics (time-resolved strain), the Poisson
+current solver, moving windows and the inter-sublattice DMI are not implemented. A world holds either
+ferromagnets or a single antiferromagnet or ferrimagnet. Ferromagnets in the same world interact only through their
+stray fields, as in mumax+.
+
+% =====================================================================
+\chapter{Devices and performance}\label{ch:perf}
+
+\section{The benchmark}
+
+\code{mumax-studio bench} measures the wall time of one solver step for a range of mesh sizes on every engine it
+finds: the processor in single and double precision, the processor with a single FFT thread, and each GPU in both
+precisions. The test problem is a permalloy film of $N\times N\times1$ cells of $2\times2\times2$\,nm$^3$ with
+exchange, demagnetisation and a static field, in a vortex state, integrated with the Dormand--Prince method at a
+fixed step. A 3D mesh of $128\times128\times16$ cells is added. The first steps, which include building the demag
+kernel and compiling GPU kernels, are not timed.
+\begin{shell}
+$ mumax-studio bench                       # all engines, CSV and PNG
+$ mumax-studio bench --engines cpu,gpu:0 --sizes 64,256,1024
+\end{shell}
+
+\section{Measured results}
+
+Figure~\ref{fig:bench} and Table~\ref{tab:bench} show the results on the computer on which this book was
+written: \input{bench_machine.tex}\unskip.
+
+\begin{figure}[htbp]
+\centering
+\IfFileExists{bench_cpu.pdf}{\includegraphics[width=0.92\linewidth]{bench_cpu.pdf}}{\fbox{benchmark figure}}
+\caption{Wall time per Dormand--Prince step against the number of cells for an $N\times N\times1$ permalloy film.
+Measured with \code{mumax-studio bench}.}
+\label{fig:bench}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Time per step (ms) and throughput (million cells per second).}
+\label{tab:bench}
+\input{bench_table.tex}
+\end{table}
+
+\paragraph{GPU results.} The computer on which this book was written has no NVIDIA graphics card, so no GPU
+figures are given; numbers that were not measured are not reported. To add them, run \code{mumax-studio bench}
+on a machine with an NVIDIA card: the GPU curves are drawn in the same figure, and the CSV files of several
+machines can be combined and redrawn with \code{mumaxstudio.bench.plot\_csv}.
+
+\section{Reading the results}
+
+The step time grows slightly faster than linearly with the number of cells, as the FFT of the demagnetising
+convolution has cost $O(N\log N)$ on a grid padded to twice its size. On the processor, double precision costs
+about a factor of two. The curve for a single FFT thread lies almost on the curve for all eight threads: on the
+processor the FFT is not the bottleneck. The element-wise NumPy operations of the field terms and the solver are,
+and NumPy runs them on one core. Throughput is highest near $10^4$ cells, where the arrays still fit in the
+processor cache. A practical rule follows: on a laptop processor, meshes up to about $10^5$ cells give
+interactive speed; beyond that a GPU, or mumax3 itself, is the better tool.
+
+% =====================================================================
+\chapter{Working with Claude}\label{ch:claude}
+
+mumax Studio can ask Claude to write, correct, explain or review scripts, and Claude Desktop or Claude Code can
+run simulations through mumax Studio themselves. None of this is needed to use the program, and nothing is sent
+anywhere until you press \menu{Send}.
+
+\section{Connecting with a Claude subscription}
+
+A Claude Pro or Max subscription is used through Claude Code, Anthropic's command-line program:
+\begin{enumerate}
+\item Install Claude Code from \url{https://claude.com/claude-code}, for example with
+\code{npm install -g @anthropic-ai/claude-code}, or the installer offered on that page.
+\item Run \code{claude} once in a terminal and sign in with your Claude account.
+\item In mumax Studio, open the \menu{Claude} panel and press \menu{Check again}. The status line reads
+\menu{Claude Code \textperiodcentered{} your Claude subscription}.
+\end{enumerate}
+Requests then count towards the usage limits of your subscription.
+
+\section{Connecting with an API key}
+
+Without a subscription, an Anthropic API key can be used. Create one at \url{https://console.anthropic.com}, paste
+it into the key field of the Claude panel and press \menu{Save}. The key is stored in
+\code{\textasciitilde/.mumaxstudio/config.json}, readable only by your user account; the environment variable
+\code{ANTHROPIC\_API\_KEY} is used instead if it is set. A pip installation needs \code{pip install anthropic}
+for this route. Usage is billed to the API account.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{fig/ui_claude.jpg}
+\caption{The \menu{Assistant} arrangement: the Claude panel, connected through Claude Code, beside the field
+viewer, the plot and the console.}
+\label{fig:claude}
+\end{figure}
+
+\section{Asking for a script}
+
+The panel has four modes:
+\begin{description}
+\item[Write] describes a simulation in words and receives a script. Tick \menu{include the current script} to
+have it extended rather than written from scratch.
+\item[Fix] sends the current script and its last error message and receives a corrected script.
+\item[Explain] receives an explanation of the physics and of each block of the current script.
+\item[Review] receives a check of cell size, time step, units and boundary conditions.
+\end{description}
+An answer that contains a script has the buttons \menu{Put in editor}, \menu{Put in editor and run} and
+\menu{Copy}. A good request names the material, the geometry with its dimensions, the excitation and what is to be
+recorded, for example:
+\begin{quote}\itshape
+Switch a 40 nm CoFeB disk, 1 nm thick, with perpendicular anisotropy, using a 2 ns spin-orbit torque pulse of
+$1.2\times10^{12}$ A/m$^2$ from a tungsten layer, with a 20 mT in-plane field along $x$; record $m_z$ every 10 ps.
+\end{quote}
+Read a generated script before trusting its results. Claude is generally reliable with the syntax but can choose
+parameters that are physically doubtful; the \menu{Review} mode and Chapter~\ref{ch:mx3} help to check them.
+
+\section{Letting Claude run simulations (MCP)}
+
+mumax Studio contains a Model Context Protocol server. A client that speaks MCP, such as Claude Desktop or Claude
+Code, can then call these tools:
+\begin{center}
+\begin{tabular}{>{\raggedright\ttfamily}p{0.3\linewidth} p{0.62\linewidth}}
+\toprule
+run\_simulation & run an \code{.mx3}, Python or mumax+ script and return the log, the final averages and the
+last table rows \\
+describe\_api & the script languages, for reference \\
+list\_examples, read\_example & the bundled examples \\
+list\_outputs, read\_table & files of earlier runs, and their tables \\
+render\_ovf & an OVF snapshot as an image that Claude can look at \\
+system\_info & version, devices and workspace \\
+\bottomrule
+\end{tabular}
+\end{center}
+In the Claude panel, \menu{Connect Claude Desktop} adds the server to Claude Desktop's configuration (keeping
+other entries and a backup of the file); restart Claude Desktop afterwards. \menu{Connect Claude Code} registers it
+for your user with Claude Code. By hand, the equivalent is
+\begin{shell}
+$ claude mcp add --scope user mumax-studio -- mumax-studio mcp
+\end{shell}
+or, in \code{claude\_desktop\_config.json},
+\begin{lstlisting}
+{ "mcpServers": { "mumax-studio": { "command": "mumax-studio", "args": ["mcp"] } } }
+\end{lstlisting}
+with the full path of \code{mumax-studio.exe} on Windows if it is not on the \code{PATH}. A conversation can then
+proceed as: ``Find the field at which a $200\times50\times5$\,nm$^3$ permalloy bar switches along its long axis,
+and show me the state just before switching.'' Claude writes the script, runs it, reads the table and inspects the
+snapshots. Simulations started this way run in \code{\textasciitilde/mumax-studio} (or the folder given by the
+environment variable \code{MUMAXSTUDIO\_WORKSPACE}) and appear on the \menu{Files} page.
+
+% =====================================================================
+\chapter{Advanced use}\label{ch:advanced}
+
+\section{Parameter sweeps}
+
+A sweep is a loop in the script. The following finds the switching field of a bar by stepping the field and
+minimising at each step; every step adds one table row:
+\begin{mxcode}
+SetGridSize(100, 25, 1); SetCellSize(2e-9, 2e-9, 5e-9)
+Msat = 800e3; Aex = 13e-12; alpha = 1
+m = Uniform(1, 0, 0)
+TableAdd(B_ext)
+for B := 0.0; B >= -0.1; B -= 0.002 {
+    B_ext = vector(B, 1e-4, 0)
+    Minimize()
+    TableSave()
+}
+\end{mxcode}
+For sweeps that should run in parallel, write one script per value and start them with
+\code{mumax-studio run a.mx3 b.mx3 ...}.
+
+\section{Custom field terms}
+
+Besides Python functions, mumax3-style quantity arithmetic defines new field terms without Python:
+\begin{mxcode}
+AddFieldTerm(Mul(Const(0.1), m))        // also Add, Madd, Dot, Cross, MulMV, Masked
+\end{mxcode}
+
+\section{Headless runs and remote GPUs}
+
+\code{mumax-studio run sim.mx3 --backend gpu --precision double} runs without an interface and writes
+\code{sim.out/} as mumax3 does. To use a GPU server from a laptop, start the interface on the server with
+\code{mumax-studio gui --host 0.0.0.0 --port 35367} and open the printed address, including its token, in the
+laptop's browser. The token grants the right to run code on the server: keep it private, and prefer an SSH tunnel
+(\code{ssh -L 35367:localhost:35367 server}) to exposing the port.
+
+\section{Thermal fluctuations}
+
+\code{Temp} adds the stochastic thermal field. Use a fixed time step, \code{FixDt}, for thermal runs;
+\code{ThermSeed} makes them repeatable. Compare averages over several seeds, not single trajectories.
+
+% =====================================================================
+\chapter{Validation and known problems}\label{ch:limits}
+
+\section{How the engine is tested}
+
+The test suite (\code{python -m unittest discover -s tests}) checks the engine against analytical results: the
+Newell demagnetisation tensor, the demagnetising factors of a cube and of a thin film, the exchange and DMI
+fields of spin spirals, Larmor precession, the anisotropy field, and the SOT and Slonczewski torques against the
+formulas of the CUDA kernels. It also tests the script language, the OVF format, the mumax+ interface, the
+interface server, the MCP server and the benchmark. The fifteen examples of the mumax3 website and nine examples
+of the mumax+ repository run to completion with plausible results.
+
+\section{Known problems}
+
+\begin{enumerate}
+\item \textbf{The GPU path has not been run on an NVIDIA card} by the author. It uses the same code as the CPU
+path through CuPy and passes the self-test logic, but its speed and its numerical agreement with the CPU path are
+unverified.
+\item \textbf{Speed.} On a processor the program is one to two orders of magnitude slower than mumax3 on a GPU
+(Chapter~\ref{ch:perf}), and it uses essentially one core: the multi-threaded FFT makes almost no difference,
+because single-threaded element-wise NumPy operations dominate.
+\item \textbf{Incomplete mumax3 coverage.} Seventeen of the 295 names of mumax3 3.12 are missing:
+\code{GrainRoughness}, \code{Line}, \code{Line2D}, \code{VoxelShape}, \code{HopfionCompactSupport},
+\code{ext\_centerWallInLayer}, \code{ext\_centerWallInRegion}, \code{ext\_AllRegionShapes},
+\code{ext\_geomEdge}, \code{ext\_grainboundaries}, \code{ext\_grainCutShape}, the Hopf-index and emergent-field
+quantities, and \code{ext\_enableCenterBubbleX/Y}. The backward-Euler solver is replaced by Heun's method with a
+fixed step.
+\item \textbf{Incomplete mumax+ coverage}, as listed in Chapter~\ref{ch:plus}; the DMI sign convention has not
+been compared with mumax+ directly.
+\item \textbf{Spin-orbit torque uses only the $z$ component of \code{JSOT}}, as the original fork does; a current
+in another direction must be expressed through \code{SOTFixedLayer}.
+\item \textbf{Defects of the original Go/CUDA fork.} With \code{SOThickness} left at its default of zero, the
+CUDA kernel divides by zero and produces NaN; mumax Studio substitutes the mesh thickness. \code{AddSOTorque} in the
+Go code reads the spin-transfer current \code{J} instead of \code{JSOT} (the value is not used). Neither is fixed in
+the Go code in this repository.
+\item \textbf{Magneto-elastic coupling is rigid}: strains are prescribed, not computed.
+\item \textbf{Releases are not code-signed}, so Windows and browsers warn about new downloads until the files
+gain reputation or are signed.
+\item \textbf{The Claude assistant can produce wrong scripts.} Its output must be checked.
+\end{enumerate}
+
+\appendix
+% =====================================================================
+\chapter{Command reference}
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}p{0.43\linewidth} p{0.5\linewidth}}
+\toprule
+mumax-studio & the interface in its own window \\
+mumax-studio gui [file] [--port P] [--workspace DIR] [--host H] [--native] & the interface, with options \\
+mumax-studio run a.mx3 [--backend cpu|gpu|gpu:N] [--precision single|double] & headless run \\
+mumax-studio info & version and devices \\
+mumax-studio convert f.ovf [--png] [--csv] [--npy] & convert output files \\
+mumax-studio bench [--engines ...] [--sizes ...] [--steps n] [--out name] & benchmark \\
+mumax-studio mcp [--workspace DIR] & MCP server on standard input and output \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\chapter{Troubleshooting}
+
+\begin{description}
+\item[The GPU is listed but disabled.] Read the reason next to it. ``NVRTC'' or ``cuFFT'' means the CUDA
+libraries are missing: use the NVIDIA package, or \code{pip install "cupy-cuda12x[ctk]"}. ``driver'' means the
+NVIDIA driver is too old.
+\item[The window stays blank.] On Windows the window needs the Edge WebView2 runtime, which Windows 10 and 11
+normally include. On Linux it needs the GTK WebKit libraries. The program falls back to the browser; the address
+is written to \code{\textasciitilde/mumax-studio/studio.log}.
+\item[A download button does nothing.] Inside the desktop window, downloads open a save dialog; if none appears,
+check that the dialog has not opened behind the main window.
+\item[Claude Code is not found.] Make sure \code{claude} runs in a new terminal, then press \menu{Check again}.
+\item[A run is slow.] Reduce the mesh, use single precision, use \code{Minimize} rather than \code{Relax} for
+static states, and check that the chosen device is the one intended.
+\end{description}
+
+\end{document}

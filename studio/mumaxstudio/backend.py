@@ -16,24 +16,117 @@ import platform
 
 import numpy as np
 
+_CPU_NAME = None
 
-def _cupy_status():
-    """Return (cupy_module, device_name) or (None, reason)."""
+
+def cpu_name():
+    """A readable processor name ('AMD Ryzen 5 7520U with Radeon Graphics'), not Windows' 'AMD64 Family 23 ...'."""
+    global _CPU_NAME
+    if _CPU_NAME is not None:
+        return _CPU_NAME
+    import sys
+
+    name = ""
     try:
-        import cupy  # noqa: F401
-    except Exception as e:  # ImportError or broken install
-        return None, f"CuPy not installed ({type(e).__name__})"
+        if sys.platform == "win32":
+            import winreg
+
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+            name = winreg.QueryValueEx(k, "ProcessorNameString")[0]
+        elif sys.platform == "darwin":
+            import subprocess
+
+            name = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
+                                  text=True, timeout=5).stdout
+        else:
+            with open("/proc/cpuinfo", encoding="utf-8") as f:
+                name = next((ln.split(":", 1)[1] for ln in f if ln.startswith("model name")), "")
+    except Exception:
+        pass
+    _CPU_NAME = " ".join(str(name).split()) or platform.processor() or platform.machine()
+    return _CPU_NAME
+
+
+def _gpu_name(cupy, i):
+    name = cupy.cuda.runtime.getDeviceProperties(i).get("name", b"GPU")
+    return name.decode(errors="replace") if isinstance(name, bytes) else str(name)
+
+
+def _gpu_selftest(cupy, i):
+    """Run a tiny FFT and an element-wise kernel on device i. Counting devices is not enough: a missing CUDA
+    runtime compiler (NVRTC) or cuFFT only shows up when the first kernel is compiled."""
+    with cupy.cuda.Device(i):
+        a = cupy.arange(64, dtype=cupy.float32).reshape(8, 8)
+        b = cupy.fft.irfftn(cupy.fft.rfftn(a), s=a.shape)
+        k = cupy.ElementwiseKernel("float32 x", "float32 y", "y = x * x + 1.0f", "studio_selftest")
+        c = k(b)
+        cupy.cuda.Device(i).synchronize()
+        if abs(float(c.sum()) - float((a * a + 1).sum())) > 1e-2 * float((a * a + 1).sum()):
+            raise RuntimeError("self-test gave wrong numbers")
+
+
+_STATUS_CACHE = {}
+
+
+def list_gpus():
+    """[{index, name, ok, note}] for every CUDA / ROCm device CuPy can see (tested once per process)."""
+    if "gpus" in _STATUS_CACHE:
+        return _STATUS_CACHE["gpus"]
+    out = []
     try:
+        import cupy
         n = cupy.cuda.runtime.getDeviceCount()
-        if n < 1:
-            return None, "CuPy installed but no GPU device found"
-        props = cupy.cuda.runtime.getDeviceProperties(0)
-        name = props.get("name", b"GPU")
-        if isinstance(name, bytes):
-            name = name.decode(errors="replace")
-        return cupy, name
     except Exception as e:
-        return None, f"CuPy installed but GPU unusable: {e}"
+        _STATUS_CACHE["gpus"], _STATUS_CACHE["why"] = [], (
+            f"CuPy not installed ({type(e).__name__})" if isinstance(e, ImportError) else f"no usable GPU: {e}")
+        return []
+    for i in range(n):
+        try:
+            name = _gpu_name(cupy, i)
+        except Exception as e:
+            out.append({"index": i, "name": f"GPU {i}", "ok": False, "note": str(e)[:200]})
+            continue
+        try:
+            _gpu_selftest(cupy, i)
+            out.append({"index": i, "name": name, "ok": True, "note": ""})
+        except Exception as e:
+            msg = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
+            if "nvrtc" in msg.lower():
+                msg += " (install the CUDA runtime compiler: pip install \"cupy-cuda12x[ctk]\")"
+            out.append({"index": i, "name": name, "ok": False, "note": msg})
+    _STATUS_CACHE["gpus"] = out
+    _STATUS_CACHE["why"] = "" if out else "CuPy installed but no GPU device found"
+    return out
+
+
+def _cupy_status(device=None):
+    """Return (cupy_module, device_name) or (None, reason). device=None picks the first working GPU."""
+    gpus = list_gpus()
+    if not gpus:
+        return None, _STATUS_CACHE.get("why") or "no GPU"
+    if device is None:
+        good = [g for g in gpus if g["ok"]]
+        if not good:
+            return None, "GPU unusable: " + gpus[0]["note"]
+        g = good[0]
+    else:
+        g = next((g for g in gpus if g["index"] == int(device)), None)
+        if g is None:
+            return None, f"there is no GPU {device} (found {len(gpus)})"
+        if not g["ok"]:
+            return None, f"GPU {device} ({g['name']}) unusable: {g['note']}"
+    import cupy
+    _STATUS_CACHE["picked"] = g["index"]
+    return cupy, g["name"]
+
+
+def list_devices():
+    """Everything the device menu offers: 'cpu' plus 'gpu:N' per working GPU (failed ones carry a note)."""
+    cpu = f"CPU {platform.processor() or platform.machine()} ({os.cpu_count()} threads)"
+    devs = [{"id": "cpu", "name": cpu, "ok": True, "note": ""}]
+    for g in list_gpus():
+        devs.append({"id": f"gpu:{g['index']}", "name": g["name"], "ok": g["ok"], "note": g["note"]})
+    return devs
 
 
 def gpu_available() -> bool:
@@ -43,6 +136,10 @@ def gpu_available() -> bool:
 class Backend:
     def __init__(self, kind: str | None = None, precision: str = "single", device: int = 0):
         kind = (kind or os.environ.get("MUMAXSTUDIO_BACKEND", "auto")).lower()
+        explicit = None
+        if kind.startswith(("gpu:", "cuda:")):   # "gpu:1" selects the second GPU
+            kind, explicit = "gpu", int(kind.split(":", 1)[1])
+            device = explicit
         if kind not in ("auto", "cpu", "gpu", "cuda", "numpy", "cupy"):
             raise ValueError(f"unknown backend '{kind}' (use auto, cpu or gpu)")
         self.dtype = np.float32 if precision.startswith("s") else np.float64
@@ -50,15 +147,17 @@ class Backend:
         want_gpu = kind in ("gpu", "cuda", "cupy")
         cp, info = (None, "not requested")
         if kind in ("auto",) or want_gpu:
-            cp, info = _cupy_status()
+            cp, info = _cupy_status(explicit if explicit is not None else (device if want_gpu and device else None))
             if want_gpu and cp is None:
                 raise RuntimeError("GPU backend requested but unavailable: " + str(info))
         if cp is not None:
+            device = _STATUS_CACHE.get("picked", device)
             cp.cuda.Device(device).use()
+            self.device_index = device
             self.xp = cp
             self.is_gpu = True
             self.name = "gpu"
-            self.device_name = f"{info} (CuPy {cp.__version__})"
+            self.device_name = f"GPU {device}: {info} (CuPy {cp.__version__})"
             self._fft = cp.fft
             self._workers = None
         else:
@@ -66,7 +165,7 @@ class Backend:
             self.is_gpu = False
             self.name = "cpu"
             self.gpu_note = info
-            self.device_name = f"CPU {platform.processor() or platform.machine()} x{os.cpu_count()} (NumPy {np.__version__})"
+            self.device_name = f"CPU {cpu_name()} x{os.cpu_count()} (NumPy {np.__version__})"
             try:
                 import scipy.fft as sfft
                 self._fft = sfft

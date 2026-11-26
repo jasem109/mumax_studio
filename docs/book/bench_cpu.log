@@ -1,0 +1,22 @@
+engines: cpu, cpu64, cpu1
+cpu           32x32   x1        1024 cells        2.62 ms/step      0.39 Mcell/s
+cpu           64x64   x1        4096 cells        4.54 ms/step      0.90 Mcell/s
+cpu          128x128  x1       16384 cells       20.86 ms/step      0.79 Mcell/s
+cpu          256x256  x1       65536 cells      133.20 ms/step      0.49 Mcell/s
+cpu          512x512  x1      262144 cells      814.95 ms/step      0.32 Mcell/s
+cpu         1024x1024 x1     1048576 cells     3464.61 ms/step      0.30 Mcell/s
+cpu          128x128  x16     262144 cells     1518.39 ms/step      0.17 Mcell/s
+cpu64         32x32   x1        1024 cells        3.07 ms/step      0.33 Mcell/s
+cpu64         64x64   x1        4096 cells        7.00 ms/step      0.59 Mcell/s
+cpu64        128x128  x1       16384 cells       37.60 ms/step      0.44 Mcell/s
+cpu64        256x256  x1       65536 cells      340.92 ms/step      0.19 Mcell/s
+cpu64        512x512  x1      262144 cells     1609.16 ms/step      0.16 Mcell/s
+cpu64       1024x1024 x1     1048576 cells     6469.98 ms/step      0.16 Mcell/s
+cpu64        128x128  x16     262144 cells     2772.61 ms/step      0.09 Mcell/s
+cpu1          32x32   x1        1024 cells        3.74 ms/step      0.27 Mcell/s
+cpu1          64x64   x1        4096 cells        6.30 ms/step      0.65 Mcell/s
+cpu1         128x128  x1       16384 cells       21.19 ms/step      0.77 Mcell/s
+cpu1         256x256  x1       65536 cells      154.33 ms/step      0.42 Mcell/s
+cpu1         512x512  x1      262144 cells      798.35 ms/step      0.33 Mcell/s
+cpu1         128x128  x16     262144 cells     1509.87 ms/step      0.17 Mcell/s
+wrote ../docs/book/bench_cpu.csv and ../docs/book/bench_cpu.png

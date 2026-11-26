@@ -28,13 +28,21 @@
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M6 15h12"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><rect x="5" y="8" width="11" height="11" rx="1"/><path d="M8 8V5h11v11h-3"/></symbol>
+    <symbol id="i-panels" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M10 4v16M10 12h11"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1M4 7v10a2 2 0 0 0 2 2h11.5l3-8H7.5l-3 8"/></symbol>
+    <symbol id="i-step-back" viewBox="0 0 24 24"><path d="M17 6 9 12l8 6zM7 6v12"/></symbol>
+    <symbol id="i-step-fwd" viewBox="0 0 24 24"><path d="m7 6 8 6-8 6zM17 6v12"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
   </defs>
 </svg>
 
 <header class="topbar">
   <div class="brand">
-    <img src="icon.svg" alt="" width="26" height="26">
-    <span class="brand-name">mumax <em>Studio</em></span>
+    <img src="icon.svg" alt="" width="20" height="20">
+    <span class="brand-name">mumax<span class="brand-sep">/</span>studio</span>
   </div>
   <label class="jobname" title="Simulation name: outputs go to &lt;name&gt;.out in the workspace">
     <span class="sr-only">Simulation name</span>
@@ -44,7 +52,7 @@
     <button id="btnRun" class="tbtn run" title="Run the script (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Run</span></button>
     <button id="btnPause" class="tbtn" title="Pause / resume" disabled><svg><use href="#i-pause"/></svg><span>Pause</span></button>
     <button id="btnStop" class="tbtn stop" title="Stop" disabled><svg><use href="#i-stop"/></svg><span>Stop</span></button>
-    <span id="statePill" class="pill idle">idle</span>
+    <span id="statePill" class="state idle" role="status">idle</span>
   </div>
   <dl class="readouts" id="stats">
     <div><dt>t</dt><dd id="stT">–</dd></div>
@@ -54,15 +62,34 @@
     <div><dt>speed</dt><dd id="stSpeed">–</dd></div>
   </dl>
   <div class="device">
-    <select id="selBackend" title="Compute device" aria-label="Compute device">
-      <option value="auto">Auto device</option>
-      <option value="cpu">CPU</option>
-      <option value="gpu">GPU (CUDA / ROCm)</option>
-    </select>
-    <select id="selPrecision" title="Floating-point precision" aria-label="Precision">
-      <option value="single">float32</option><option value="double">float64</option>
-    </select>
-    <span id="deviceInfo" class="deviceinfo"></span>
+    <label class="devsel"><span class="lbl">Device</span>
+      <select id="selBackend" aria-label="Compute device for the next run">
+        <option value="auto">Auto</option>
+      </select>
+    </label>
+    <label class="devsel"><span class="lbl">Precision</span>
+      <select id="selPrecision" aria-label="Floating-point precision for the next run">
+        <option value="single">float32</option><option value="double">float64</option>
+      </select>
+    </label>
+    <span id="deviceInfo" class="deviceinfo" aria-live="polite"></span>
+    <details class="menu" id="panelMenuWrap">
+      <summary class="iconbtn" title="Panels and layouts" aria-label="Panels and layouts"><svg><use href="#i-panels"/></svg></summary>
+      <div class="menubody" id="panelMenu" role="menu">
+        <div class="mhead">Panels</div>
+        <button role="menuitemcheckbox" data-open="view">2D field view</button>
+        <button role="menuitemcheckbox" data-open="view3d">3D field view and OVF player</button>
+        <button role="menuitemcheckbox" data-open="plot">Table plot</button>
+        <button role="menuitemcheckbox" data-open="console">Console</button>
+        <button role="menuitemcheckbox" data-open="assistant">Claude assistant</button>
+        <div class="mhead">Layouts</div>
+        <button data-preset="standard">Standard</button>
+        <button data-preset="viewer">Two viewers</button>
+        <button data-preset="analysis">Analysis</button>
+        <button data-preset="assistant">Writing with Claude</button>
+        <p class="mnote">Drag a panel by its title to move it. Drag the gaps between panels to resize them.</p>
+      </div>
+    </details>
     <button class="iconbtn" id="btnTheme" title="Light / dark" aria-label="Toggle dark theme"><svg><use href="#i-theme"/></svg></button>
   </div>
 </header>
@@ -310,18 +337,33 @@
           <tr><td><code>SPINHALL</code>, <code>HFLoverHDL</code></td><td>spin Hall angle, field-like/damping-like ratio</td></tr>
           <tr><td><code>SOThickness</code>, <code>SOTFixedLayer</code></td><td>thickness (0 = mesh), polarization σ</td></tr>
         </table>
+        <h3>mumax⁺ scripts (Python)</h3>
+        <p>Python scripts that <code>import mumaxplus</code> run on a built-in implementation of the mumax⁺ API: <code>World</code>, <code>Grid</code>, <code>Ferromagnet</code>, <code>Antiferromagnet</code> and <code>Ferrimagnet</code> (two sublattices with <code>afmex_cell</code>, <code>afmex_nn</code>, <code>latcon</code>), parameters set from numbers, arrays or functions, <code>timesolver.run / solve</code>, <code>minimize</code>, <code>relax</code>, and <code>mumaxplus.util</code> (shapes, initial states, Voronoi grains, plotting). Figures from <code>plt.show()</code> are saved as PNG files in the output folder. If the official <code>mumaxplus</code> package is installed it takes precedence.</p>
+        <pre>from mumaxplus import World, Grid, Ferromagnet
+world = World(cellsize=(500e-9/128, 125e-9/32, 3e-9))
+magnet = Ferromagnet(world, Grid((128, 32, 1)))
+magnet.msat, magnet.aex, magnet.alpha = 800e3, 13e-12, 0.02
+magnet.magnetization = (1, 0.1, 0)
+magnet.minimize()
+print(magnet.magnetization.average())</pre>
+        <h3>3D view and OVF files</h3>
+        <p>Open the 3D panel from the Panels menu. It shows the running simulation, or OVF files: drop one or more files on it, use <b>OVF…</b>, or press <b>3D</b> next to a snapshot on the Files page (the other snapshots in that folder become frames you can play). Drag to orbit, right-drag or Shift-drag to pan, scroll to zoom. <b>Slice</b> crops the box and thins the glyphs.</p>
+        <h3>Claude</h3>
+        <p>The Claude panel writes scripts from a description, fixes a failing script, explains one or reviews its physics. It uses Claude Code when it is installed and signed in (Claude Pro or Max subscription), or an Anthropic API key. To let Claude Desktop or Claude Code run simulations themselves, register the MCP server once:</p>
+        <pre>claude mcp add mumax-studio -- mumax-studio mcp</pre>
         <h3>Devices</h3>
-        <p>The CPU (NumPy + SciPy FFT) always works. Install CuPy for your GPU, <code>pip install cupy-cuda12x</code> (NVIDIA) or <code>cupy-rocm-*</code> (AMD, Linux), then choose <b>GPU</b> or <b>Auto</b>.</p>
+        <p>The CPU (NumPy + SciPy FFT) always works. For an NVIDIA GPU install <code>pip install "cupy-cuda12x[ctk]"</code>; for AMD on Linux, <code>cupy-rocm-*</code>. Each GPU is tested when the app starts; the device menu lists every GPU that passed and greys out the ones that did not, with the reason in the tooltip. The choice is remembered and applies from the next Run.</p>
         <h3>Colours</h3>
         <p>Vectors use the mumax3 colour wheel: hue = in-plane direction, white = +z, black = −z.</p>
       </div>
     </div>
   </section>
 
-  <!-- ======================= viewer ======================= -->
-  <section class="panel viewer" aria-label="Field viewer">
+  <div class="dock" id="dock">
+  <!-- ======================= 2D viewer ======================= -->
+  <section class="panel viewer" data-panel="view" aria-label="2D field view">
     <div class="toolbar">
-      <span class="vtitle" id="viewTitle">Magnetization</span>
+      <span class="vtitle" id="viewTitle">Field</span>
       <select id="selQuantity" title="Quantity"><option value="m">m</option></select>
       <select id="selComp" title="Component">
         <option value="v">colour wheel</option><option value="0">x</option><option value="1">y</option><option value="2">z</option>
@@ -341,8 +383,63 @@
     <div class="infoline small" id="viewInfo">&nbsp;</div>
   </section>
 
+  <!-- ======================= 3D viewer / OVF player ======================= -->
+  <section class="panel view3d" data-panel="view3d" aria-label="3D field view">
+    <div class="toolbar">
+      <span class="vtitle">3D</span>
+      <select id="v3source" title="What to show" aria-label="Source">
+        <option value="live">Live simulation</option>
+        <option value="files">Files</option>
+      </select>
+      <select id="v3quantity" title="Quantity (live)" aria-label="Quantity"><option value="m">m</option></select>
+      <label class="filebtn btn small" title="Open .ovf files from this computer (several files make a sequence)"><svg><use href="#i-open"/></svg>OVF…<input type="file" id="v3files" accept=".ovf" multiple></label>
+      <select id="v3glyph" title="Glyph" aria-label="Glyph">
+        <option value="arrow">arrows</option><option value="cone">cones</option><option value="cube">cells</option>
+      </select>
+      <select id="v3color" title="Colour" aria-label="Colour">
+        <option value="wheel">colour wheel</option><option value="x">x</option><option value="y">y</option><option value="z">z</option><option value="mag">|v|</option>
+      </select>
+      <details class="menu right">
+        <summary class="btn small" title="Density, size and slicing">Slice</summary>
+        <div class="menubody slicebox">
+          <label>every <input type="number" id="v3stride" min="1" max="64" value="1"> cells</label>
+          <label>glyph size <input type="range" id="v3size" min="0.3" max="2.5" step="0.05" value="1"></label>
+          <div class="slicegrid">
+            <span>x</span><input type="range" id="v3x0" min="0" max="1" step="0.001" value="0"><input type="range" id="v3x1" min="0" max="1" step="0.001" value="1">
+            <span>y</span><input type="range" id="v3y0" min="0" max="1" step="0.001" value="0"><input type="range" id="v3y1" min="0" max="1" step="0.001" value="1">
+            <span>z</span><input type="range" id="v3z0" min="0" max="1" step="0.001" value="0"><input type="range" id="v3z1" min="0" max="1" step="0.001" value="1">
+          </div>
+          <label class="check"><input type="checkbox" id="v3outline" checked> box and axes</label>
+          <label class="check"><input type="checkbox" id="v3light" checked> shading</label>
+          <button class="btn small" id="v3sliceReset" type="button">Reset slice</button>
+        </div>
+      </details>
+      <span class="spacer"></span>
+      <div class="seg" role="group" aria-label="Camera">
+        <button type="button" data-cam="iso" title="Perspective">3D</button><button type="button" data-cam="top" title="From +z">top</button><button type="button" data-cam="front" title="From −y">front</button><button type="button" data-cam="side" title="From +x">side</button>
+      </div>
+      <button class="iconbtn" id="v3refresh" title="Reload" aria-label="Reload"><svg><use href="#i-refresh"/></svg></button>
+      <button class="iconbtn" id="v3png" title="Save image" aria-label="Save image"><svg><use href="#i-image"/></svg></button>
+    </div>
+    <div class="canvaswrap" id="v3wrap">
+      <canvas id="view3d"></canvas>
+      <div class="v3legend" id="v3legend"></div>
+      <div class="empty" id="v3empty"><p><b>No field loaded.</b><br>Run a simulation, open .ovf files, or drop them here.<br><span class="muted">Several files play as a sequence.</span></p></div>
+      <div class="v3status" id="v3status" hidden></div>
+    </div>
+    <div class="framebar" id="v3frames" hidden>
+      <button class="iconbtn" id="v3prev" title="Previous frame" aria-label="Previous frame"><svg><use href="#i-step-back"/></svg></button>
+      <button class="iconbtn" id="v3play" title="Play / pause" aria-label="Play"><svg><use href="#i-play"/></svg></button>
+      <button class="iconbtn" id="v3next" title="Next frame" aria-label="Next frame"><svg><use href="#i-step-fwd"/></svg></button>
+      <input type="range" id="v3frame" min="0" max="0" value="0" aria-label="Frame">
+      <label class="small">fps <input type="number" id="v3fps" min="1" max="60" value="8"></label>
+      <span class="small mono" id="v3frameLabel"></span>
+    </div>
+    <div class="infoline small" id="v3info">&nbsp;</div>
+  </section>
+
   <!-- ======================= plot ======================= -->
-  <section class="panel plot" aria-label="Table plot">
+  <section class="panel plot" data-panel="plot" aria-label="Table plot">
     <div class="toolbar">
       <span class="vtitle">Table</span>
       <label class="small">x <select id="selX"></select></label>
@@ -354,13 +451,67 @@
   </section>
 
   <!-- ======================= console ======================= -->
-  <section class="panel console" aria-label="Console">
+  <section class="panel console" data-panel="console" aria-label="Console">
+    <div class="toolbar">
+      <span class="vtitle">Console</span>
+      <span class="spacer"></span>
+      <button class="btn small" id="btnClearLog" type="button" title="Clear the console">Clear</button>
+      <button class="btn small" id="btnSaveLog" type="button" title="Save the log as a text file">Save log</button>
+    </div>
     <div class="log" id="log" role="log" aria-live="polite"></div>
     <div class="cmdline">
-      <span class="prompt">›</span>
-      <input id="cmd" placeholder="B_ext = vector(0, 0, 0.1)   ·   Save(m)   ·   Run(1e-9)        ↑ ↓ history" spellcheck="false" aria-label="Command">
+      <span class="prompt">&gt;</span>
+      <input id="cmd" placeholder="B_ext = vector(0, 0, 0.1)    Save(m)    Run(1e-9)    (up / down: history)" spellcheck="false" aria-label="Command">
     </div>
   </section>
+
+  <!-- ======================= Claude assistant ======================= -->
+  <section class="panel assistant" data-panel="assistant" aria-label="Claude assistant">
+    <div class="toolbar">
+      <span class="vtitle">Claude</span>
+      <span class="small muted" id="asStatus">checking…</span>
+      <span class="spacer"></span>
+      <select id="asBackend" title="How to reach Claude" aria-label="Connection">
+        <option value="auto">automatic</option>
+        <option value="cli">Claude Code (subscription)</option>
+        <option value="api">API key</option>
+      </select>
+    </div>
+    <div class="alog" id="asLog">
+      <div class="aempty" id="asEmpty">
+        <p>Describe a simulation in plain language and Claude writes the script. It can also fix a script that fails, explain one, or review the physics.</p>
+        <p class="muted">Nothing is sent until you press Send. The current script is sent only when you tick the box or use Fix, Explain or Review.</p>
+        <p class="aconnect">Let Claude run simulations itself (it can write a script, run it, read the table and look at snapshots):
+          <button class="btn small" id="asConnDesktop" type="button">Connect Claude Desktop</button>
+          <button class="btn small" id="asConnCode" type="button">Connect Claude Code</button></p>
+      </div>
+      <div class="asetup" id="asSetup" hidden>
+        <h4>Connect Claude</h4>
+        <p><b>With a Claude Pro or Max subscription:</b> install Claude Code from <code>claude.com/claude-code</code>, open a terminal, run <code>claude</code> once and sign in. Then press <i>Check again</i>.</p>
+        <p><b>With an Anthropic API key:</b> <span id="asSdkNote">run <code>pip install anthropic</code> first, then</span> paste the key here. It is stored in your user folder on this computer only.</p>
+        <div class="keyrow"><input id="asKey" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="API key"><button class="btn small" id="asSaveKey" type="button">Save key</button><button class="btn small" id="asClearKey" type="button">Remove</button></div>
+        <p class="small muted" id="asKeyState"></p>
+        <button class="btn small" id="asRecheck" type="button">Check again</button>
+      </div>
+    </div>
+    <div class="acompose">
+      <div class="amodes" role="radiogroup" aria-label="Request type">
+        <label><input type="radio" name="asMode" value="generate" checked><span>Write</span></label>
+        <label><input type="radio" name="asMode" value="fix"><span>Fix</span></label>
+        <label><input type="radio" name="asMode" value="explain"><span>Explain</span></label>
+        <label><input type="radio" name="asMode" value="improve"><span>Review</span></label>
+      </div>
+      <textarea id="asInput" rows="3" placeholder="Describe the simulation, e.g. “Switch a 40 nm CoFeB disk with a 2 ns spin-orbit torque pulse, JSOT = 1e12 A/m², and record mz.”"></textarea>
+      <div class="arow">
+        <label class="check small" id="asScriptRow"><input type="checkbox" id="asScript"> include the current script</label>
+        <label class="check small"><input type="checkbox" id="asLog2"> include the run log</label>
+        <span class="spacer"></span>
+        <span class="small muted">Ctrl+Enter</span>
+        <button class="btn primary small" id="asSend" type="button" disabled>Send</button>
+      </div>
+    </div>
+  </section>
+  </div>
 </main>
 
 <div class="modal" id="tokenModal" hidden>
@@ -371,9 +522,14 @@
     <button class="btn primary" id="tokenOk">Connect</button>
   </div>
 </div>
+<div class="toast" id="toast" role="status" hidden></div>
 <script src="waveforms.js"></script>
 <script src="geometry.js"></script>
 <script src="drive.js"></script>
+<script src="layout.js"></script>
+<script src="ovf.js"></script>
+<script src="view3d.js"></script>
+<script src="assistant.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

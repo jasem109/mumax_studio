@@ -5,6 +5,8 @@
     mumax-studio run a.mx3 [b.mx3 ...]   run scripts headless (output in a.out/)
     mumax-studio info                    show compute backends (CPU / GPU)
     mumax-studio convert f.ovf [--png|--csv|--npy]
+    mumax-studio mcp                     MCP server on stdin/stdout, so Claude can run simulations
+    mumax-studio bench                   time per step against mesh size on every CPU / GPU engine
 """
 from __future__ import annotations
 
@@ -24,14 +26,16 @@ def _cmd_info(args):
     cp, info = _cupy_status()
     print("GPU backend :", info if cp is None else f"available: {info}")
     if cp is None:
-        print("              install CuPy for GPU support, e.g.  pip install cupy-cuda12x  (NVIDIA)")
+        print("              install CuPy for GPU support, e.g.  pip install \"cupy-cuda12x[ctk]\"  (NVIDIA)")
         print("              or  pip install cupy-rocm-5-0  (AMD ROCm, Linux)")
 
 
 def _cmd_run(args):
+    from .plus import install_alias
     from .script import ScriptError, run_file
     from .simulation import Simulation
 
+    install_alias()   # `import mumaxplus` in .py scripts loads the built-in mumax+ API
     status = 0
     for path in args.files:
         out = os.path.splitext(path)[0] + ".out"
@@ -39,6 +43,18 @@ def _cmd_run(args):
         t0 = time.time()
         sim = Simulation(backend=args.backend, precision=args.precision, out_dir=out)
         print("//backend:", sim.be.device_name, f"({sim.be.precision} precision)")
+        if path.lower().endswith(".py"):
+            # mumax+ worlds use the chosen device and write to <script>.out; plt.show() saves PNG files there
+            from . import plus
+            from .server import _prepare_matplotlib
+
+            def hook(world, sim=sim, out=out):
+                world._backend = sim.be
+                world._precision = sim.be.precision
+                world._out_dir = out
+
+            plus._WORLD_HOOK = hook
+            _prepare_matplotlib(out, print)
         try:
             run_file(sim, path)
         except ScriptError as e:
@@ -81,6 +97,26 @@ def _cmd_convert(args):
         print("converted", f)
 
 
+def _cmd_bench(args):
+    from . import bench
+
+    engines = args.engines.split(",") if args.engines else None
+    sizes = [int(v) for v in args.sizes.split(",")] if args.sizes else None
+    print("engines:", ", ".join(engines or bench.engines_available()))
+    bench.run(engines, sizes, steps=args.steps, out=args.out)
+    print(f"wrote {args.out}.csv and {args.out}.png")
+
+
+def _cmd_mcp(args):
+    if args.workspace:
+        os.environ["MUMAXSTUDIO_WORKSPACE"] = os.path.abspath(args.workspace)
+    from . import mcp
+
+    if args.workspace:
+        mcp.WORKSPACE = os.environ["MUMAXSTUDIO_WORKSPACE"]
+    mcp.serve_stdio()
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0].startswith("--") and argv[0] not in ("-h", "--help"):
@@ -119,6 +155,17 @@ def main(argv=None):
     c.add_argument("--csv", action="store_true")
     c.add_argument("--npy", action="store_true")
     c.set_defaults(fn=_cmd_convert)
+
+    b = sub.add_parser("bench", help="speed benchmark: time per step against mesh size for every engine")
+    b.add_argument("--engines", default=None, help="comma separated: cpu, cpu64, cpu1, gpu:0, gpu:0/64 (default: all)")
+    b.add_argument("--sizes", default=None, help="comma separated N for N x N x 1 meshes")
+    b.add_argument("--steps", type=int, default=30)
+    b.add_argument("--out", default="bench", help="output name without extension")
+    b.set_defaults(fn=_cmd_bench)
+
+    m = sub.add_parser("mcp", help="Model Context Protocol server for Claude (stdin/stdout)")
+    m.add_argument("--workspace", default=None, help="folder for scripts and outputs")
+    m.set_defaults(fn=_cmd_mcp)
 
     args = p.parse_args(argv)
     if not getattr(args, "fn", None):

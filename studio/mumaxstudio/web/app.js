@@ -89,7 +89,7 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
       ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme = dark ? "light" : "dark";
     store.set("studioTheme", document.documentElement.dataset.theme);
-    redraw(); drawPlot(); DRIVE.drawWaves();
+    redraw(); drawPlot(); DRIVE.drawWaves(); VIEW3D.draw();
   });
 })();
 
@@ -357,13 +357,46 @@ $("#fileOpen").addEventListener("change", (e) => {
   rd.readAsText(f);
   e.target.value = "";
 });
-function downloadBlob(blob, name) {
+// ------------------------------------------------------------------ saving files
+// Inside the desktop app (pywebview) <a download> on a blob: URL does nothing, which is why the download buttons
+// used to fail there. The app exposes a native save dialog (window.pywebview.api); browsers use the anchor.
+const native = () => window.pywebview && window.pywebview.api && window.pywebview.api.save_base64;
+function toast(msg, ms = 3200) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, ms);
+}
+async function blobToBase64(blob) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function downloadBlob(blob, name) {
+  if (!blob) { toast("Nothing to save"); return; }
+  if (native()) {
+    try {
+      const p = await window.pywebview.api.save_base64(name, await blobToBase64(blob));
+      if (p) toast("Saved " + p);
+    } catch (e) { logLine("ERROR: could not save: " + e); }
+    return;
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+async function downloadWorkspaceFile(path) {
+  const name = path.split("/").pop();
+  if (native() && window.pywebview.api.save_workspace_file) {
+    try { const p = await window.pywebview.api.save_workspace_file(path); if (p) toast("Saved " + p); } catch (e) { logLine("ERROR: could not save: " + e); }
+    return;
+  }
+  try { downloadBlob(await api("/api/file?path=" + encodeURIComponent(path), { blob: true }), name); } catch (e) { logLine("ERROR: " + e.message); }
 }
 $("#btnDownloadScript").addEventListener("click", () => {
   const ext = $("#selLang").value === "py" ? ".py" : ".mx3";
@@ -383,8 +416,9 @@ async function run() {
   }
   const body = {
     name: ($("#jobName").value || "untitled").replace(/[^\w-]/g, "_"), script: editor.value, lang: $("#selLang").value,
-    backend: $("#selBackend").value, precision: $("#selPrecision").value,
+    device: $("#selBackend").value, precision: $("#selPrecision").value,
   };
+  lastError = "";
   logSeq = 0;
   table = { header: null, rows: [] };
   plotSource = "live";
@@ -410,16 +444,18 @@ $("#btnStop").addEventListener("click", async () => {
   try { await api("/api/stop", { body: {} }); } catch (e) { logLine("ERROR: " + e.message); }
   pollSoon();
 });
+let lastError = "";
 function setState(s) {
   state = s;
   const pill = $("#statePill");
   pill.textContent = s;
-  pill.className = "pill " + s;
+  pill.className = "state " + s;
   const active = s === "running" || s === "paused";
   $("#btnPause").disabled = !active;
   $("#btnStop").disabled = !active;
   $("#btnPause").querySelector("span").textContent = s === "paused" ? "Resume" : "Pause";
   $("#btnPause").querySelector("use").setAttribute("href", s === "paused" ? "#i-play" : "#i-pause");
+  if (typeof showDeviceInfo === "function" && devices.length) showDeviceInfo();
 }
 
 // ------------------------------------------------------------------ console
@@ -478,8 +514,8 @@ function handleStatus(s) {
   $("#stDt").textContent = fmtSI(st.dt, "s", 3);
   $("#stTorque").textContent = fmtSI(st.maxTorque, "T", 3);
   $("#stSpeed").textContent = s.speed ? `${Math.round(s.speed).toLocaleString()}/s` : "–";
-  $("#deviceInfo").textContent = st.device;
-  $("#selBackend").title = "Running on: " + st.device;
+  runningDevice = st.device || "";
+  showDeviceInfo();
   const sel = $("#selQuantity");
   const want = (s.quantities || []).join("|");
   if (sel.dataset.list !== want && s.quantities) {
@@ -488,6 +524,10 @@ function handleStatus(s) {
     for (const q of s.quantities) { const o = document.createElement("option"); o.value = o.textContent = q; sel.appendChild(o); }
     sel.value = s.quantities.includes(cur) ? cur : "m";
     sel.dataset.list = want;
+    const q3 = $("#v3quantity"), cur3 = q3.value;
+    q3.innerHTML = "";
+    for (const q of s.quantities) { const o = document.createElement("option"); o.value = o.textContent = q; q3.appendChild(o); }
+    q3.value = s.quantities.includes(cur3) ? cur3 : "m";
   }
   if (st.mesh) setLayers(st.mesh.n[2]);
   const t = s.table;
@@ -502,6 +542,7 @@ function handleStatus(s) {
     }
   }
   if (s.state === "error" && s.error) {
+    lastError = s.error;
     $("#errorBar").textContent = s.error;
     $("#errorBar").hidden = false;
     if (s.error_line) { errorLine = s.error_line; syncEditor(); }
@@ -510,7 +551,69 @@ function handleStatus(s) {
   if (viewSource === "live" && $("#chkAuto").checked && st.mesh && !geometryMode()) {
     if (s.state === "running" || prev !== s.state || !lastField) fetchField();
   }
+  if (st.mesh && LAYOUT.isOpen("view3d") && $("#v3source").value === "live") {
+    const now = performance.now();
+    if ((s.state === "running" && now - last3d > 1500) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
+  }
 }
+let last3d = 0, busy3d = false;
+async function load3dLive() {
+  if (busy3d) return;
+  busy3d = true;
+  try { await VIEW3D.loadLive(api); $("#v3empty").hidden = true; } catch (e) { /* no mesh yet */ }
+  busy3d = false;
+}
+
+// ------------------------------------------------------------------ device menu
+let devices = [], runningDevice = "", settings = {};
+function saveSetting(k, v) {
+  settings[k] = v;
+  api("/api/settings", { body: { [k]: v } }).catch(() => { /* older server */ });
+}
+function fillDevices(inf) {
+  devices = inf.devices || [{ id: "cpu", name: inf.cpu, ok: true }];
+  const sel = $("#selBackend");
+  sel.innerHTML = "";
+  const good = devices.filter((d) => d.ok && d.id.startsWith("gpu:"));
+  const add = (v, txt, dis, title) => { const o = document.createElement("option"); o.value = v; o.textContent = txt; o.disabled = !!dis; if (title) o.title = title; sel.appendChild(o); };
+  add("auto", good.length ? `Auto (GPU ${good[0].id.slice(4)})` : "Auto (CPU)");
+  for (const d of devices) {
+    if (d.id === "cpu") add("cpu", "CPU", false, d.name);
+    else add(d.id, `GPU ${d.id.slice(4)}: ${d.name}` + (d.ok ? "" : " (unusable)"), !d.ok, d.ok ? d.name : d.note);
+  }
+  if (!devices.some((d) => d.id.startsWith("gpu:"))) add("gpu:none", "GPU: none found (install CuPy)", true, inf.gpu && inf.gpu.info);
+  const want = settings.device || inf.default_backend || "auto";
+  sel.value = [...sel.options].some((o) => o.value === want && !o.disabled) ? want : "auto";
+  if (settings.precision) $("#selPrecision").value = settings.precision;
+  showDeviceInfo();
+}
+function deviceLabel(id) {
+  if (id === "auto") { const g = devices.find((d) => d.ok && d.id.startsWith("gpu:")); return g ? g.name : "CPU"; }
+  const d = devices.find((x) => x.id === id);
+  return d ? (d.id === "cpu" ? "CPU" : d.name) : id;
+}
+function showDeviceInfo() {
+  const el = $("#deviceInfo");
+  const next = deviceLabel($("#selBackend").value) + " · " + $("#selPrecision").selectedOptions[0].textContent;
+  const active = state === "running" || state === "paused";
+  if (active && runningDevice) {
+    el.textContent = "running on " + runningDevice.replace(/\s*\(.*$/, "");
+    el.title = `Running on: ${runningDevice}\nNext run: ${next}`;
+  } else {
+    el.textContent = "next run: " + next;
+    el.title = runningDevice ? `Last run used: ${runningDevice}` : "The device is used from the next Run on.";
+  }
+}
+$("#selBackend").addEventListener("change", () => {
+  saveSetting("device", $("#selBackend").value);
+  showDeviceInfo();
+  if (state === "running" || state === "paused") toast("The new device is used from the next Run. The current run stays where it is.");
+});
+$("#selPrecision").addEventListener("change", () => {
+  saveSetting("precision", $("#selPrecision").value);
+  showDeviceInfo();
+  if (state === "running" || state === "paused") toast("The new precision is used from the next Run.");
+});
 function setLayers(nz) {
   const lay = $("#layer");
   if (Number(lay.max) !== nz - 1) {
@@ -755,10 +858,13 @@ $("#btnSavePng").addEventListener("click", () => {
   view.toBlob((b) => b && downloadBlob(b, `${geometryMode() ? "geometry" : lastField ? lastField.hdr.name : "view"}.png`));
 });
 let resizeRaf = 0;
-new ResizeObserver(() => {
+function relayout() {
   cancelAnimationFrame(resizeRaf);
-  resizeRaf = requestAnimationFrame(() => { redraw(); drawPlot(); DRIVE.drawWaves(); });
-}).observe(document.body);
+  resizeRaf = requestAnimationFrame(() => { redraw(); drawPlot(); DRIVE.drawWaves(); VIEW3D.draw(); });
+}
+const resizeObs = new ResizeObserver(relayout);
+resizeObs.observe(document.body);
+$$(".canvaswrap").forEach((c) => resizeObs.observe(c));
 
 // ------------------------------------------------------------------ plot
 const plot = $("#plot");
@@ -913,9 +1019,22 @@ async function loadFiles() {
     if (f.path.endsWith(".ovf")) act("view", "Show in the viewer", () => viewOvf(f.path));
     if (f.path.endsWith("table.txt")) act("plot", "Plot this table", () => plotFile(f.path));
     if (/\.(mx3|py)$/.test(f.path)) act("open", "Open in the editor", () => openScriptFile(f.path));
-    act("download", "Download", async () => downloadBlob(await api("/api/file?path=" + encodeURIComponent(f.path), { blob: true }), parts[parts.length - 1]));
+    if (f.path.endsWith(".ovf")) act("3D", "Show in the 3D viewer; the other snapshots in this folder become frames", () => ovfTo3D(f.path, r.files));
+    act("save", "Save a copy", () => downloadWorkspaceFile(f.path));
     list.appendChild(row);
   }
+}
+function ovfTo3D(path, files) {
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  const base = path.slice(dir.length).replace(/\d+\.ovf$/, "");
+  const series = files.map((f) => f.path).filter((p) => p.startsWith(dir) && !p.slice(dir.length).includes("/") &&
+    p.endsWith(".ovf") && p.slice(dir.length).replace(/\d+\.ovf$/, "") === base)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  LAYOUT.open("view3d");
+  $("#v3source").value = "files";
+  VIEW3D.addWorkspaceFiles(series.length ? series : [path], api);
+  const i = series.indexOf(path);
+  if (i > 0) setTimeout(() => VIEW3D.showFrame(i), 50);
 }
 $("#btnRefreshFiles").addEventListener("click", loadFiles);
 $("#fileUpload").addEventListener("change", async (e) => {
@@ -951,12 +1070,83 @@ async function openScriptFile(path) {
   switchTab("script");
 }
 
+// ------------------------------------------------------------------ console tools
+$("#btnClearLog").addEventListener("click", () => { logEl.textContent = ""; });
+$("#btnSaveLog").addEventListener("click", () => {
+  const txt = Array.from(logEl.childNodes).map((d) => d.textContent).join("\n") + "\n";
+  downloadBlob(new Blob([txt], { type: "text/plain" }), ($("#jobName").value || "run") + "_log.txt");
+});
+
+// ------------------------------------------------------------------ 3D viewer controls
+function v3info() {
+  const i = VIEW3D.info();
+  $("#v3empty").hidden = !!i;
+  const fb = $("#v3frames");
+  if (!i) { $("#v3info").textContent = " "; fb.hidden = true; return; }
+  const n = i.fullN && i.stride && (i.stride[0] > 1 || i.stride[2] > 1)
+    ? `${i.fullN.join("×")} cells, shown every ${i.stride[0]}` : `${i.n.join("×")} cells`;
+  const avg = i.avg ? ` · ⟨v⟩ = (${i.avg.map((v) => fmtNum(v, 4)).join(", ")})` : "";
+  const t = i.t !== null && i.t !== undefined ? ` · t = ${fmtSI(i.t, "s")}` : "";
+  $("#v3info").textContent = `${i.live ? "live" : i.frameName || i.name} · ${n} · ${i.glyphs.toLocaleString()} glyphs${t}${avg}`;
+  fb.hidden = i.frames < 2;
+  if (i.frames >= 2) {
+    $("#v3frame").max = i.frames - 1;
+    $("#v3frame").value = i.frame;
+    $("#v3frameLabel").textContent = `${i.frame + 1} / ${i.frames}  ${i.frameName}`;
+  }
+  $("#v3play use").setAttribute("href", VIEW3D.playing ? "#i-pause" : "#i-play");
+  const leg = $("#v3legend");
+  const c = VIEW3D.opt.color;
+  leg.className = "v3legend " + (i.ncomp === 1 || c !== "wheel" ? "bar" : "wheel");
+  leg.textContent = i.ncomp === 1 ? "scalar / max" : c === "wheel" ? "" : c === "mag" ? "|v| / max" : `${c} / max`;
+}
+VIEW3D.on("info", v3info);
+VIEW3D.on("frames", v3info);
+function v3opts() {
+  const o = VIEW3D.opt;
+  o.glyph = $("#v3glyph").value;
+  o.color = $("#v3color").value;
+  o.stride = Math.max(1, Number($("#v3stride").value) || 1);
+  o.size = Number($("#v3size").value) || 1;
+  const r = (a, b) => { let x = Number($(a).value), y = Number($(b).value); if (y < x) [x, y] = [y, x]; return [x, Math.max(y, x + 0.001)]; };
+  o.slice = [r("#v3x0", "#v3x1"), r("#v3y0", "#v3y1"), r("#v3z0", "#v3z1")];
+  o.outline = $("#v3outline").checked;
+  o.light = $("#v3light").checked;
+  VIEW3D.build();
+}
+["#v3glyph", "#v3color", "#v3stride", "#v3outline", "#v3light"].forEach((s) => $(s).addEventListener("change", v3opts));
+["#v3size", "#v3x0", "#v3x1", "#v3y0", "#v3y1", "#v3z0", "#v3z1"].forEach((s) => $(s).addEventListener("input", v3opts));
+$("#v3sliceReset").addEventListener("click", () => {
+  ["#v3x0", "#v3y0", "#v3z0"].forEach((s) => { $(s).value = 0; });
+  ["#v3x1", "#v3y1", "#v3z1"].forEach((s) => { $(s).value = 1; });
+  v3opts();
+});
+$$("[data-cam]").forEach((b) => b.addEventListener("click", () => VIEW3D.viewFrom(b.dataset.cam)));
+$("#v3files").addEventListener("change", (e) => { $("#v3source").value = "files"; VIEW3D.addLocalFiles(e.target.files); e.target.value = ""; });
+$("#v3source").addEventListener("change", () => {
+  if ($("#v3source").value === "live") { VIEW3D.play(false); load3dLive(); }
+  else if (VIEW3D.live) { VIEW3D.status("Open .ovf files with the OVF… button, drop them here, or use 3D next to a file on the Files page."); }
+});
+$("#v3quantity").addEventListener("change", () => { $("#v3source").value = "live"; load3dLive(); });
+$("#v3refresh").addEventListener("click", () => { if ($("#v3source").value === "live") load3dLive(); else VIEW3D.showFrame(VIEW3D.info() ? VIEW3D.info().frame : 0); });
+$("#v3png").addEventListener("click", () => VIEW3D.png((b) => downloadBlob(b, "view3d.png")));
+$("#v3play").addEventListener("click", () => VIEW3D.play());
+$("#v3prev").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame - 1); });
+$("#v3next").addEventListener("click", () => { VIEW3D.play(false); VIEW3D.showFrame(VIEW3D.info().frame + 1); });
+$("#v3frame").addEventListener("input", (e) => { VIEW3D.play(false); VIEW3D.showFrame(Number(e.target.value)); });
+// close open dropdown menus when clicking elsewhere
+document.addEventListener("pointerdown", (e) => {
+  $$("details.menu[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+});
+
 // ------------------------------------------------------------------ public hooks for geometry.js / drive.js
 window.STUDIO = { api, upload, redraw, info: (t) => { if (geometryMode()) info(t); else logLine("// " + t); } };
 
 // ------------------------------------------------------------------ init
 GEOM.init(() => { renderRegionRows(); formsChanged(); redraw(); });
 DRIVE.init(formsChanged);
+LAYOUT.init({ onChange: relayout, save: (st) => saveSetting("layout", st) });
+VIEW3D.init();
 let initDone = false;
 async function init() {
   let inf;
@@ -972,11 +1162,15 @@ async function init() {
     o.value = ex; o.textContent = ex.split("/").pop().replace(/\.(mx3|py)$/, "").replace(/^\d+_/, "").replace(/_/g, " ");
     groups[g].appendChild(o);
   }
-  const gpuOpt = $("#selBackend").querySelector('option[value="gpu"]');
-  if (!inf.gpu.available) { gpuOpt.disabled = true; gpuOpt.textContent = "GPU (not available)"; }
-  $("#selBackend").value = inf.default_backend in { auto: 1, cpu: 1, gpu: 1 } ? inf.default_backend : "auto";
-  $("#deviceInfo").textContent = inf.gpu.available ? "GPU: " + inf.gpu.info : inf.cpu;
-  $("#selBackend").title = inf.gpu.info;
+  settings = inf.settings || {};
+  fillDevices(inf);
+  if (settings.layout) LAYOUT.restore(settings.layout);
+  ASSIST.init({
+    api, saveSetting, settings: () => settings, run,
+    getScript: () => ({ text: editor.value, lang: $("#selLang").value }),
+    setScript: (text, lang) => { setEditor(text, lang || "mx3"); lastGenerated = null; saveDraft(); switchTab("script"); },
+    lastError: () => lastError,
+  });
   const hadForms = loadForms();
   if (!hadForms) GEOM.reset(["rect"]);
   renderRegionRows();

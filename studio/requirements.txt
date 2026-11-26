@@ -1,9 +1,12 @@
 numpy>=1.22
 scipy>=1.8
 pillow>=9
+matplotlib>=3.5   # figures from mumax+ style scripts (plt.show saves PNG files)
 # GPU (optional) - pick the one matching your system:
 #   cupy-cuda12x      NVIDIA, CUDA 12 driver
 #   cupy-cuda11x      NVIDIA, CUDA 11 driver
 #   cupy-rocm-5-0     AMD ROCm (Linux)
 # Native desktop window (optional):
 #   pywebview
+# Claude assistant with an API key (optional; a Claude Pro / Max subscription works through Claude Code instead):
+#   anthropic

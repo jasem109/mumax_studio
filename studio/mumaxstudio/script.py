@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import math
 import random as _random
+import re
 import sys
 import time as _time
 import traceback
@@ -48,6 +49,9 @@ VARIABLES = {
     "ShiftMagU": "ShiftMagU", "ShiftMagD": "ShiftMagD", "ShiftM": "ShiftM", "ShiftGeom": "ShiftGeom",
     "ShiftRegions": "ShiftRegions",
 }
+from .api312 import VARIABLES as _V312  # noqa: E402
+
+VARIABLES.update(_V312)
 READONLY = {"step": "NSteps", "NSteps": "NSteps", "NUndone": "NUndone", "LastErr": "LastErr", "PeakErr": "PeakErr"}
 
 
@@ -190,6 +194,8 @@ def build_api(sim, out=print):
     api["RK45"] = K.DORMANDPRINCE
     for f in ("OVF1_TEXT", "OVF1_BINARY", "OVF2_TEXT", "OVF2_BINARY", "NUMPY"):
         api[f] = f
+    from . import api312
+    api312.extend_api(api, sim, out)
     return api
 
 
@@ -302,11 +308,52 @@ def _patch_timefunc():
 _patch_timefunc()
 
 
+_PLUS_IMPORT = re.compile(r"^\s*(from|import)\s+mumaxplus\b", re.M)
+
+
+def _run_plain_python(source, filename, out, namespace):
+    """mumax+ scripts are ordinary Python: run them without the mumax3 globals (whose magic names such as m,
+    alpha or B_ext would capture the script's own variables). print() goes to the run log."""
+    import builtins
+
+    from .plus import install_alias
+
+    install_alias()
+
+    def _print(*args, sep=" ", end="\n", file=None, flush=False):
+        if file is not None and file not in (sys.stdout, sys.stderr):
+            return builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
+        out(sep.join(str(a) for a in args) + ("" if end == "\n" else end))
+
+    g = {"__name__": "__main__", "__file__": filename, "__builtins__": builtins, "print": _print}
+    try:
+        code = compile(source, filename, "exec")
+    except SyntaxError as e:
+        raise ScriptError(f"{filename}:{e.lineno}: syntax error: {e.msg}", e.lineno) from None
+    try:
+        exec(code, g)
+    except SystemExit:
+        out("// exit()")
+    except Exception as e:
+        from .simulation import SimulationStopped
+
+        if isinstance(e, SimulationStopped):
+            raise
+        ln = None
+        for fr in traceback.extract_tb(sys.exc_info()[2]):
+            if fr.filename == filename:
+                ln = fr.lineno
+        raise ScriptError(f"{filename}:{ln}: {type(e).__name__}: {e}", ln) from e
+    return namespace
+
+
 def run_source(sim, source, filename="<script>", lang=None, out=None, namespace=None):
     """Run mx3 or Python source. Returns the namespace (for an interactive console)."""
     out = out or sim.log
     if lang is None:
         lang = "py" if filename.endswith(".py") else "mx3"
+    if lang == "py" and _PLUS_IMPORT.search(source):
+        return _run_plain_python(source, filename, out, namespace)
     if namespace is None:
         api = build_api(sim, out)
         g = make_globals(sim, api)
