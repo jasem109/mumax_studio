@@ -256,7 +256,7 @@ class Studio:
         self.native = False   # True inside the desktop window (pywebview): downloads go through a save dialog
 
     # ---------------------------------------------------------------- settings (device, precision, ...)
-    SETTINGS_KEYS = ("device", "precision", "theme", "layout", "assistant_backend")
+    SETTINGS_KEYS = ("device", "precision", "theme", "layout", "assistant_backend", "update_skip")
 
     def settings(self):
         from .assistant import _load_cfg
@@ -308,6 +308,40 @@ class Studio:
 
         assistant.set_api_key(str(body.get("key", "")))
         return assistant.status()
+
+    # ---------------------------------------------------------------- updates (GitHub releases)
+    def api_update(self, q, body):
+        from . import updater
+
+        return updater.check(force=q.get("force", ["0"])[0] == "1")
+
+    def _updater(self):
+        from . import updater
+
+        if getattr(self, "_upd", None) is None:
+            self._upd = updater.Updater()
+        return self._upd
+
+    def api_update_start(self, q, body):
+        return self._updater().start()
+
+    def api_update_progress(self, q, body):
+        return self._updater().status()
+
+    def api_update_apply(self, q, body):
+        if self.job and self.job.running:
+            self.job.control.request_stop()
+            self.job.thread.join(timeout=10)
+        st = self._updater().apply()
+        # leave time for this response to reach the page, then quit so the files can be replaced
+        threading.Timer(1.5, lambda: os._exit(0)).start()
+        return st
+
+    def api_update_open(self, q, body):
+        from . import updater
+
+        webbrowser.open(updater.check().get("page") or updater.RELEASES_PAGE)   # only ever the release page
+        return {"ok": True}
 
     def api_assistant_connect(self, q, body):
         from . import assistant
@@ -632,6 +666,9 @@ class Studio:
         ("GET", "/api/field3d"): "api_field3d", ("POST", "/api/settings"): "api_settings", ("GET", "/api/assistant"): "api_assistant_status",
         ("POST", "/api/assistant/key"): "api_assistant_key", ("POST", "/api/assist"): "api_assist",
         ("POST", "/api/assistant/connect"): "api_assistant_connect",
+        ("GET", "/api/update"): "api_update", ("POST", "/api/update/start"): "api_update_start",
+        ("GET", "/api/update/progress"): "api_update_progress", ("POST", "/api/update/apply"): "api_update_apply",
+        ("POST", "/api/update/open"): "api_update_open",
     }
 
 

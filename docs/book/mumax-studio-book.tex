@@ -279,6 +279,20 @@ prints the version, the processor, and every GPU found. Each GPU is tested with 
 kernel; a card that fails is listed with the reason, for example a missing NVRTC library. In the packaged Windows
 program the same information is shown in the interface under the \menu{Device} menu.
 
+\section{Updating}
+
+From version 0.3.0 on, the program asks GitHub for the latest release each time it starts; this needs an internet
+connection, and the request contains nothing but the program's name and version. When a newer version exists, a
+card in the lower right corner gives its number. \menu{What's new} shows the release notes, \menu{Later} hides the
+card until the next version, and \menu{Update now} downloads the file that matches the installation, verifies its
+SHA-256 checksum against the list published with the release, installs it and restarts the program. A running
+simulation is stopped first; its output so far is kept. \menu{Help} $\rightarrow$ \menu{Check for updates} checks
+by hand. A file whose checksum does not match is discarded and nothing is installed.
+
+The Windows installer edition runs the new installer silently into the same folder. The portable, Linux and macOS
+editions replace their program folder. Installations made with pip or from a source checkout cannot replace
+themselves; for them the card shows the command \code{pip install -U "mumax-studio @ git+https://github.com/jasem109/mumax\_studio\#subdirectory=studio"}.
+
 % =====================================================================
 \chapter{A first simulation}\label{ch:first}
 

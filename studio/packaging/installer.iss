@@ -52,3 +52,5 @@ Root: HKA; Subkey: "Software\Classes\mumaxStudio.mx3\shell\open\command"; ValueT
 
 [Run]
 Filename: "{app}\mumax-studio.exe"; Description: "Start mumax Studio"; Flags: nowait postinstall skipifsilent
+; an in-app update runs this installer silently: start the new version afterwards, as the user (not elevated)
+Filename: "{app}\mumax-studio.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent

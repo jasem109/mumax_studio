@@ -1193,5 +1193,88 @@ async function init() {
   redraw();
   poll();
 }
+// ------------------------------------------------------------------ updates
+// At start (and from Help → Check for updates) the server asks GitHub for the latest release. A newer version shows
+// a card with the version number; "Update now" downloads it, verifies its SHA-256, installs it and restarts the app.
+const UPD = (() => {
+  let info = null, timer = null;
+  const card = $("#updateCard");
+  const fmtMB = (b) => (b / 1048576).toFixed(b > 1048576 * 10 ? 0 : 1) + " MB";
+  function show(i) {
+    info = i;
+    $("#ucTitle").textContent = `mumax Studio ${i.latest} is available`;
+    $("#ucNotes").textContent = (i.notes || "No release notes.").trim();
+    $("#ucNotes").hidden = true;
+    $("#ucProg").hidden = true;
+    const now = $("#ucNow");
+    if (i.can_update) {
+      $("#ucSub").textContent = `You have ${i.current}. Download ${i.size ? fmtMB(i.size) : ""}, installed and restarted for you; an internet connection is needed.`;
+      now.textContent = "Update now"; now.disabled = false; now.dataset.mode = "update";
+    } else {
+      $("#ucSub").innerHTML = "";
+      $("#ucSub").append(`You have ${i.current}. `);
+      if (i.how && i.how.startsWith("pip ")) {
+        const c = document.createElement("code"); c.textContent = i.how;
+        $("#ucSub").append("Update with ", c);
+      } else $("#ucSub").append(i.how || "");
+      now.textContent = "Open release page"; now.disabled = false; now.dataset.mode = "page";
+    }
+    $("#ucLater").disabled = false;
+    card.hidden = false;
+  }
+  async function check(force) {
+    let i;
+    try { i = await api("/api/update" + (force ? "?force=1" : "")); } catch (e) { i = { error: e.message }; }
+    const line = $("#updLine");
+    if (i.error) { if (force) line.textContent = i.error; return; }
+    if (!i.available) { if (force) line.textContent = `You have the latest version (${i.current}).`; return; }
+    line.textContent = `Version ${i.latest} is available.`;
+    if (!force && settings.update_skip === i.latest) return;   // "Later" hides this version until asked again
+    show(i);
+  }
+  async function progress() {
+    let s;
+    try { s = await api("/api/update/progress"); } catch (e) { s = { phase: "error", message: e.message }; }
+    const bar = $("#ucBar");
+    if (s.phase === "downloading") {
+      bar.style.width = s.total ? `${(100 * s.done / s.total).toFixed(1)}%` : "30%";
+      $("#ucSub").textContent = `Downloading… ${fmtMB(s.done)}${s.total ? " of " + fmtMB(s.total) : ""}`;
+    } else if (s.phase === "verifying") {
+      $("#ucSub").textContent = "Verifying the SHA-256 checksum…";
+    } else if (s.phase === "ready") {
+      clearInterval(timer); timer = null;
+      bar.style.width = "100%";
+      $("#ucSub").textContent = "Downloaded and verified. Installing; mumax Studio closes and starts again by itself.";
+      try { await api("/api/update/apply", { body: {} }); } catch (e) { /* the app is quitting */ }
+    } else if (s.phase === "error") {
+      clearInterval(timer); timer = null;
+      $("#ucProg").hidden = true;
+      $("#ucSub").textContent = "Update failed: " + s.message;
+      $("#ucNow").textContent = "Try again"; $("#ucNow").disabled = false; $("#ucLater").disabled = false;
+    }
+  }
+  async function updateNow() {
+    if ($("#ucNow").dataset.mode === "page") { api("/api/update/open", { body: {} }).catch(() => {}); return; }
+    if (state === "running" || state === "paused") {
+      if (!confirm("A simulation is running. Updating stops it (its output so far is kept). Continue?")) return;
+    }
+    $("#ucNow").disabled = true; $("#ucLater").disabled = true;
+    $("#ucProg").hidden = false; $("#ucBar").style.width = "0";
+    $("#ucSub").textContent = "Connecting to GitHub…";
+    try { await api("/api/update/start", { body: {} }); } catch (e) { $("#ucSub").textContent = "Update failed: " + e.message; $("#ucNow").disabled = false; return; }
+    timer = setInterval(progress, 400);
+  }
+  function later() { card.hidden = true; if (info) saveSetting("update_skip", info.latest); }
+  $("#ucNow").addEventListener("click", updateNow);
+  $("#ucLater").addEventListener("click", later);
+  $("#ucClose").addEventListener("click", later);
+  $("#ucNotesBtn").addEventListener("click", () => { $("#ucNotes").hidden = !$("#ucNotes").hidden; });
+  $("#btnCheckUpdate").addEventListener("click", () => { $("#updLine").textContent = "Checking…"; check(true); });
+  return { check };
+})();
+
 updateHints();
-init();
+init().then(() => {
+  api("/api/info").then((i) => { $("#verLine").textContent = `mumax Studio ${i.version}`; }).catch(() => {});
+  setTimeout(() => UPD.check(false), 2500);
+});

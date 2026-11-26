@@ -301,6 +301,9 @@
     <!-- ======================= Help ======================= -->
     <div class="page" id="page-help">
       <div class="help">
+        <p class="versionline"><span id="verLine">mumax Studio</span>
+          <button class="btn small" id="btnCheckUpdate" type="button">Check for updates</button>
+          <span class="muted" id="updLine"></span></p>
         <h3>Workflow</h3>
         <ol>
           <li><b>Geometry</b>: set the mesh and build the magnet from shapes, imported STL models, images or your own <code>inside(x, y, z)</code> code.</li>
@@ -523,6 +526,18 @@ print(magnet.magnetization.average())</pre>
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
+<aside class="updatecard" id="updateCard" role="status" aria-live="polite" hidden>
+  <div class="uc-head"><span class="uc-kicker">Update available</span><button class="uc-x" id="ucClose" type="button" aria-label="Later">×</button></div>
+  <p class="uc-title" id="ucTitle"></p>
+  <p class="uc-sub" id="ucSub"></p>
+  <pre class="uc-notes" id="ucNotes" hidden></pre>
+  <div class="uc-prog" id="ucProg" hidden><div class="uc-bar" id="ucBar"></div></div>
+  <div class="uc-acts">
+    <button class="btn small" id="ucNotesBtn" type="button">What's new</button>
+    <button class="btn small" id="ucLater" type="button">Later</button>
+    <button class="btn small primary" id="ucNow" type="button">Update now</button>
+  </div>
+</aside>
 <script src="waveforms.js"></script>
 <script src="geometry.js"></script>
 <script src="drive.js"></script>

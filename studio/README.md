@@ -50,6 +50,15 @@ or first compare `Get-FileHash <file>` with `SHA256SUMS.txt` on the release page
 pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"
 ```
 
+### Updates
+
+From 0.3.0 on, the app checks GitHub for a newer release when it starts (an internet connection is needed; the
+request carries no personal data). A newer version shows a card with its number and release notes. **Update now**
+downloads the file for your installation, verifies its SHA-256 against the release's `SHA256SUMS.txt`, installs it
+and restarts the app; **Later** hides that version. *Help → Check for updates* checks by hand. Installer builds
+re-run the installer silently, portable / Linux / macOS builds replace their program folder; pip and source
+installs are shown the upgrade command instead.
+
 ## Install from source
 
 Requires Python 3.9 or newer.
