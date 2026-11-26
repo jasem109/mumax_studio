@@ -35,7 +35,7 @@ jobs:
           - { os: windows-latest, edition: "-nvidia" }
           - { os: ubuntu-22.04, edition: "" }
           - { os: ubuntu-22.04, edition: "-nvidia" }
-          - { os: macos-14, edition: "" }
+          - { os: macos-latest, edition: "" }
     runs-on: ${{ matrix.os }}
     defaults: { run: { working-directory: studio } }
     env:
