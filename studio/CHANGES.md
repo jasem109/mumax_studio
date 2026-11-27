@@ -2,6 +2,14 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.2
+
+- **Credits on the start screen.** The splash shown while mumax Studio starts now cites the two papers it is
+  built on — mumax³ (A. Vansteenkiste *et al.*, *The design and verification of MuMax3*, AIP Advances **4**,
+  107133 (2014), doi:10.1063/1.4899186) and mumax⁺ (L. Moreels *et al.*, *mumax+: extensible GPU-accelerated
+  micromagnetics and beyond*, arXiv:2411.18194 (2024)) — please cite them when you publish results. It also
+  acknowledges that the software was developed with the help of Claude (Anthropic).
+
 ## 0.5.1
 
 - **All of mumax+.** mumax Studio now ships the Python package of mumax+ 1.2.2 itself and runs it on its own

@@ -290,6 +290,9 @@ class TestOutputFolder(Isolated):
         self.assertTrue(r.get("ok"))
         self._wait(st)
         self.assertIn(__version__, splash_html())
+        self.assertIn("10.1063/1.4899186", splash_html())   # mumax3 paper
+        self.assertIn("2411.18194", splash_html())          # mumax+ paper
+        self.assertIn("Claude", splash_html())
 
     def test_change_folder_and_run_there(self):
         from mumaxstudio import server

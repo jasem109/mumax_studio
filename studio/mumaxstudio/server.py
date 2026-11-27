@@ -1188,8 +1188,10 @@ html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,-apple-system,sa
 .bar{width:180px;height:3px;border-radius:2px;background:rgba(127,127,127,.25);overflow:hidden}
 .bar i{display:block;width:40%;height:100%;background:#b5441c;border-radius:2px;animation:m 1.1s ease-in-out infinite}
 @keyframes m{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+.cr{position:fixed;left:0;right:0;bottom:22px;text-align:center;font-size:11.5px;line-height:1.6;opacity:.6;padding:0 24px}
 </style></head><body><div class="c">{icon}<div class="n">mumax Studio</div><div class="v">version {version}</div>
-<div class="s">starting the simulation engine…</div><div class="bar"><i></i></div></div></body></html>"""
+<div class="s">starting the simulation engine…</div><div class="bar"><i></i></div></div>
+<div class="cr">Built on <b>mumax³</b> — A. Vansteenkiste <i>et al.</i>, <i>AIP Advances</i> <b>4</b>, 107133 (2014), doi:10.1063/1.4899186<br>and <b>mumax⁺</b> — L. Moreels <i>et al.</i>, arXiv:2411.18194 (2024)<br>Developed with the help of Claude (Anthropic)</div></body></html>"""
 
 
 def serve(host="127.0.0.1", port=35367, script=None, backend=None, precision="single", open_browser=True,
