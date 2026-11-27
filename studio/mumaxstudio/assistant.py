@@ -10,7 +10,9 @@ Two ways to reach Claude, chosen automatically (or by the user in the GUI):
 * **Anthropic API key** through the official `anthropic` Python SDK (`pip install anthropic`). The key comes from
   ANTHROPIC_API_KEY or is stored by the GUI in ~/.mumaxstudio/config.json (readable only by the user on POSIX).
 
-Nothing is sent anywhere until the user presses a button in the assistant panel.
+Nothing is sent anywhere until the user presses Send. With every request go the earlier turns of the
+conversation, the files the user attached to it (papers, data, figures), and, when ticked, the script in
+the editor and a summary of the current run.
 """
 from __future__ import annotations
 
@@ -25,8 +27,28 @@ import time
 MODEL = "claude-opus-5-5"
 CONFIG = os.path.join(os.path.expanduser("~"), ".mumaxstudio", "config.json")
 
-SYSTEM_PROMPT = """You write micromagnetic simulation scripts for mumax Studio, a Python port of mumax3 (with the
-spin-transfer / spin-orbit torque extensions of the mumax3 STT-SOT fork and a mumax+ compatible Python API).
+SYSTEM_PROMPT = """You are the assistant built into mumax Studio, a desktop app for micromagnetic simulations: a
+Python port of mumax3 (with the spin-transfer / spin-orbit torque extensions of the mumax3 STT-SOT fork and a mumax+
+compatible Python API). You help researchers and students in two ways:
+
+A. Science and technique. Answer questions about micromagnetics and magnetism (LLG / LLGS equation, exchange,
+   anisotropy, demagnetisation, DMI, magneto-elastic coupling, thermal fields), spintronics (STT, SOT, spin Hall
+   effect, Slonczewski and Zhang-Li torques, domain-wall and skyrmion motion, spin waves, FMR, switching), material
+   parameters, numerical methods (finite differences, time steppers, cell size, convergence, boundary conditions)
+   and how to read simulation results (tables, spectra, OVF snapshots). Answer like an expert colleague: correct,
+   specific, with the relevant equations and typical values in SI units, and say when something is uncertain or
+   depends on the material. Do not invent references; cite only well-known sources you are sure of.
+B. Scripts. Write, explain, review and fix simulation scripts for mumax Studio (details below).
+
+When the user attaches papers or other files, read them and use them: take geometry, material parameters, drive
+and protocol from the paper, say where each value comes from (section, table, figure, equation), and say clearly
+which values the paper does not give and what you chose instead. When results of the user's run are included
+(table columns, last rows, output files, log), use them to interpret what happened.
+
+The app: the user runs a script with the Run button or by typing /run in the console; you never run anything.
+In the console, mumax commands run inside the current simulation, and cd <folder>, mkdir <folder>, pwd and ls change
+or show the output folder (each run writes <folder>/<name>.out/). Files the user uploads on the Files page land in
+the output folder, so a script can use them by name (e.g. STLShape("part.stl", 1e-9), ImageShape("mask.png")).
 
 Script languages:
 1. .mx3 (mumax3 syntax, Go-like). Everything in mumax3 3.12 works: SetGridSize, SetCellSize, SetPBC, SetGeom,
@@ -62,9 +84,12 @@ Script languages:
 Units are SI (m, s, A/m, J/m, J/m3, T, A/m2). Choose cell sizes below the exchange length (about 5 nm for
 permalloy). Keep meshes modest (up to ~2e5 cells) unless the user asks for more; the CPU backend is slower than a GPU.
 
-Answer format: one short paragraph explaining what the script does and any physics choices, then exactly one fenced
-code block (```mx3 or ```python) holding the complete script that runs as is. When asked to explain, answer in prose
-and include code only if it helps. When asked to fix a script, return the whole corrected script."""
+Answer format: plain prose for questions; keep it focused and skip filler. Formatting that shows well: paragraphs,
+"-" lists, **bold**, *italics*, `code`, "### " headings and fenced code blocks; write equations in plain text or
+simple LaTeX inline (e.g. l_ex = sqrt(2A / (mu0 Ms^2))); no tables. When you write or fix a script: one short
+paragraph on what it does and the physics choices, then exactly one fenced code block (```mx3 or ```python) holding
+the complete script that runs as is (a fix returns the whole corrected script). Use .mx3 unless the request needs
+Python or names mumax+. Include code in other answers only when it helps."""
 
 
 # ------------------------------------------------------------------ configuration
@@ -301,28 +326,141 @@ def connect_claude_code():
     return {"ok": True, "message": "Connected. Ask Claude Code to run a simulation."}
 
 
+# ------------------------------------------------------------------ attachments (papers, data, figures)
+TEXT_EXT = (".txt", ".md", ".tex", ".bib", ".mx3", ".py", ".csv", ".dat", ".json", ".m", ".log")
+IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+             ".webp": "image/webp"}
+ATTACH_EXT = TEXT_EXT + tuple(IMAGE_EXT) + (".pdf",)
+MAX_ATTACH = 25_000_000      # bytes per file
+MAX_ATTACH_TOTAL = 60_000_000
+MAX_TEXT = 150_000           # characters of a text file sent to Claude
+
+
+def _attach_root():
+    return os.path.join(os.path.dirname(CONFIG), "attachments")
+
+
+def _conv_dir(conv):
+    if not re.fullmatch(r"[a-f0-9]{8,32}", str(conv or "")):
+        raise AssistantError("bad conversation id")
+    return os.path.join(_attach_root(), conv)
+
+
+def clean_attachment_name(name):
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    stem, ext = os.path.splitext(base)
+    stem = "".join(c if c.isalnum() or c in "-_. " else "_" for c in stem).strip(" .")[:80] or "file"
+    return stem + ext.lower()
+
+
+def attachments(conv):
+    d = _conv_dir(conv)
+    if not os.path.isdir(d):
+        return []
+    return [{"name": n, "size": os.path.getsize(os.path.join(d, n))} for n in sorted(os.listdir(d))
+            if n.endswith(ATTACH_EXT) and os.path.isfile(os.path.join(d, n))]
+
+
+def attach(conv, name, data):
+    """Keep a file the user attached to the conversation; Claude reads it with every later request."""
+    name = clean_attachment_name(name)
+    if not name.endswith(ATTACH_EXT):
+        raise AssistantError("Claude can read PDF, image and text files (" + " ".join(TEXT_EXT) + ")")
+    if len(data) > MAX_ATTACH:
+        raise AssistantError(f"{name} is too large (max {MAX_ATTACH // 1_000_000} MB)")
+    others = sum(f["size"] for f in attachments(conv) if f["name"] != name)
+    if others + len(data) > MAX_ATTACH_TOTAL:
+        raise AssistantError(f"the files of one conversation are limited to {MAX_ATTACH_TOTAL // 1_000_000} MB")
+    d = _conv_dir(conv)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), "wb") as f:
+        f.write(data)
+    return {"name": name, "size": len(data)}
+
+
+def detach(conv, name=None):
+    """Remove one attachment, or all of them (name None) when the conversation is cleared."""
+    d = _conv_dir(conv)
+    if name is None:
+        shutil.rmtree(d, ignore_errors=True)
+        return
+    p = os.path.join(d, clean_attachment_name(name))
+    if os.path.isfile(p):
+        os.remove(p)
+
+
+def cleanup_attachments(max_age_days=7):
+    """Forget the attachments of conversations untouched for a week (called when the app starts)."""
+    root = _attach_root()
+    if not os.path.isdir(root):
+        return
+    cut = time.time() - max_age_days * 86400
+    for n in os.listdir(root):
+        p = os.path.join(root, n)
+        try:
+            if os.path.isdir(p) and os.path.getmtime(p) < cut:
+                shutil.rmtree(p, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        t = f.read(MAX_TEXT + 1)
+    return t[:MAX_TEXT] + ("\n[... the rest of the file was left out]" if len(t) > MAX_TEXT else "")
+
+
 # ------------------------------------------------------------------ requests
-def build_prompt(mode, request, script="", lang="mx3", error="", log=""):
+MODES = {
+    "chat": "",
+    "generate": "Write a simulation script for the following request.",
+    "fix": "Fix this script so it runs and does what it is meant to do.",
+    "explain": "Explain this script: the physics, what every block does, and what to expect from the results.",
+    "improve": "Review this script for physics and numerical problems (cell size vs exchange length, time step, "
+               "boundary conditions, units) and return an improved version.",
+}
+MAX_HISTORY_TURNS = 16
+MAX_TURN_CHARS = 8000
+
+
+def _clean_history(history):
+    """Earlier turns of the conversation, alternating user / assistant and starting with the user."""
+    out = []
+    for h in list(history or [])[-MAX_HISTORY_TURNS:]:
+        if not isinstance(h, dict):
+            continue
+        role = "assistant" if h.get("role") in ("assistant", "claude") else "user"
+        text = str(h.get("text", "")).strip()
+        if not text:
+            continue
+        if len(text) > MAX_TURN_CHARS:
+            text = text[:MAX_TURN_CHARS] + "\n[... shortened]"
+        if out and out[-1]["role"] == role:
+            out[-1]["text"] += "\n\n" + text
+        else:
+            out.append({"role": role, "text": text})
+    while out and out[0]["role"] != "user":
+        out.pop(0)
+    if out and out[-1]["role"] == "user":   # the new request follows: the history must end with an answer
+        out.pop()
+    return out
+
+
+def build_prompt(mode, request, script="", lang="mx3", error="", log="", context=""):
     parts = []
-    if mode == "fix":
-        parts.append("Fix this script so it runs and does what it is meant to do.")
-    elif mode == "explain":
-        parts.append("Explain this script: the physics, what every block does, and what to expect from the results.")
-    elif mode == "improve":
-        parts.append("Review this script for physics and numerical problems (cell size vs exchange length, time step, "
-                     "boundary conditions, units) and return an improved version.")
-    else:
-        parts.append("Write a simulation script for the following request.")
+    head = MODES.get(mode, "")
+    if head:
+        parts.append(head)
     if request:
-        parts.append("Request: " + request.strip())
+        parts.append(("Request: " if head else "") + request.strip())
     if script.strip():   # the GUI sends the script only when the user asked for it (or for fix / explain / review)
-        parts.append(f"Current script ({lang}):\n```{'python' if lang == 'py' else 'mx3'}\n{script}\n```")
+        parts.append(f"Current script in the editor ({lang}):\n```{'python' if lang == 'py' else 'mx3'}\n{script}\n```")
     if error:
         parts.append("Error reported by mumax Studio:\n" + error.strip())
+    if context:
+        parts.append("The user's simulation (state and results):\n" + context.strip())
     if log:
         parts.append("Last lines of the run log:\n" + log.strip()[-3000:])
-    if mode == "generate":
-        parts.append("Use .mx3 unless the request needs Python or names mumax+.")
     return "\n\n".join(parts)
 
 
@@ -343,20 +481,23 @@ class AssistantError(Exception):
     pass
 
 
-def _ask_cli(prompt, timeout=600, model=None, system=None):
+def _ask_cli(prompt, timeout=600, model=None, system=None, files_dir=None):
     exe = find_claude_cli()
     if not exe:
         raise AssistantError("Claude Code is not installed. Install it from https://claude.com/claude-code, then "
                              "sign in with your Claude Pro or Max account.")
     if not subscription_ok(auth_status()):
         raise AssistantError("Claude is not authorized: sign in with a Claude Pro or Max account in the Claude panel.")
+    # no tools, so Claude only writes text; with attached papers it may only Read, and only the files in their
+    # folder (the working directory: a read elsewhere needs a permission nobody can give in print mode)
+    tools = ["--tools", "Read", "--permission-mode", "default"] if files_dir else ["--tools", ""]
     cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--system-prompt", system or SYSTEM_PROMPT,
-           "--tools", "", "--no-session-persistence"]
+           *tools, "--no-session-persistence"]
     if model:
         cmd += ["--model", model]
     try:
         r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
-                           creationflags=NOWIN)
+                           creationflags=NOWIN, cwd=files_dir or None)
     except subprocess.TimeoutExpired:
         raise AssistantError(f"Claude did not answer within {timeout // 60} minutes") from None
     out = (r.stdout or "").strip()
@@ -382,7 +523,7 @@ def _ask_cli(prompt, timeout=600, model=None, system=None):
     return data.get("result", out)
 
 
-def _ask_api(prompt):
+def _ask_api(prompt, history=(), files=()):
     try:
         import anthropic
     except ImportError:
@@ -391,8 +532,25 @@ def _ask_api(prompt):
     if not key:
         raise AssistantError("no Anthropic API key: paste one in the assistant settings or set ANTHROPIC_API_KEY")
     client = anthropic.Anthropic(api_key=key)
+    import base64
+
+    blocks = []
+    for path in files:   # papers as documents, figures as images; cached, since they go with every request
+        name = os.path.basename(path)
+        ext = os.path.splitext(name)[1]
+        with open(path, "rb") as f:
+            data = base64.standard_b64encode(f.read()).decode()
+        if ext == ".pdf":
+            blocks.append({"type": "document", "title": name,
+                           "source": {"type": "base64", "media_type": "application/pdf", "data": data}})
+        elif ext in IMAGE_EXT:
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": IMAGE_EXT[ext], "data": data}})
+    if blocks:
+        blocks[-1]["cache_control"] = {"type": "ephemeral"}
+    msgs = [{"role": h["role"], "content": h["text"]} for h in history]
+    msgs.append({"role": "user", "content": blocks + [{"type": "text", "text": prompt}]})
     kwargs = dict(model=MODEL, max_tokens=32000, system=SYSTEM_PROMPT, output_config={"effort": "high"},
-                  messages=[{"role": "user", "content": prompt}])
+                  thinking={"type": "adaptive"}, messages=msgs)
     try:
         try:
             # server-side fallback: if the model declines, the API retries on a fallback model in the same call
@@ -420,8 +578,9 @@ def _ask_api(prompt):
     return text
 
 
-def ask(mode="generate", request="", script="", lang="mx3", error="", log="", backend="auto"):
-    prompt = build_prompt(mode, request, script, lang, error, log)
+def ask(mode="chat", request="", script="", lang="mx3", error="", log="", backend="auto", history=None, conv="",
+        context=""):
+    prompt = build_prompt(mode, request, script, lang, error, log, context)
     st = status()
     use = backend if backend in ("cli", "api") else st["preferred"]
     if not use:
@@ -429,7 +588,30 @@ def ask(mode="generate", request="", script="", lang="mx3", error="", log="", ba
                              "panel (or enter an Anthropic API key).")
     if use == "cli" and not st["authorized"]:
         raise AssistantError("Claude Code is not signed in with a Claude Pro or Max account.")
-    text = _ask_cli(prompt) if use == "cli" else _ask_api(prompt)
+    hist = _clean_history(history)
+    files = [os.path.join(_conv_dir(conv), a["name"]) for a in attachments(conv)] if conv else []
+    if files:
+        try:
+            os.utime(_conv_dir(conv))   # in use: keep it from the clean-up of old conversations
+        except OSError:
+            pass
+    # text files go into the prompt itself; Claude reads PDFs and images (Read tool, or document / image blocks)
+    texts = [f for f in files if f.endswith(TEXT_EXT)]
+    binary = [f for f in files if not f.endswith(TEXT_EXT)]
+    pre = [f'Attached file {os.path.basename(f)}:\n<file name="{os.path.basename(f)}">\n{_read_text(f)}\n</file>'
+           for f in texts]
+    if use == "cli":
+        if binary:
+            pre.append("The user attached these files; they are in your working directory. Read them with the Read "
+                       "tool before answering (all the pages that matter for the question):\n"
+                       + "\n".join("- ./" + os.path.basename(f) for f in binary))
+        if hist:
+            pre.insert(0, "The conversation so far:\n\n" + "\n\n".join(
+                f"[{'User' if h['role'] == 'user' else 'You'}]\n{h['text']}" for h in hist) + "\n\n[User, now]")
+        text = _ask_cli("\n\n".join(pre + [prompt]), timeout=900 if binary else 600,
+                        files_dir=_conv_dir(conv) if binary else None)
+    else:
+        text = _ask_api("\n\n".join(pre + [prompt]), hist, binary)
     code, clang = extract_code(text)
-    return {"text": text, "code": code, "lang": clang, "backend": use,
+    return {"text": text, "code": code, "lang": clang, "backend": use, "attachments": [os.path.basename(f) for f in files],
             "usage": _load_cfg().get("claude_usage") if use == "cli" else None}

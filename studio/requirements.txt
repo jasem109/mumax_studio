@@ -2,6 +2,7 @@ numpy>=1.22
 scipy>=1.8
 pillow>=9
 matplotlib>=3.5   # figures from mumax+ style scripts (plt.show saves PNG files)
+tqdm>=4          # progress bars used by the mumax+ examples
 # GPU (optional) - pick the one matching your system:
 #   cupy-cuda12x      NVIDIA, CUDA 12 driver
 #   cupy-cuda11x      NVIDIA, CUDA 11 driver

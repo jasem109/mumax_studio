@@ -1,9 +1,19 @@
 "use strict";
 /* Claude assistant panel. Requests go to the local server (/api/assist), which reaches Claude through
    Claude Code signed in with a Claude Pro / Max account (or through an Anthropic API key). The panel stays locked
-   until one of the two is authorized. The Usage button shows how much of the plan's limits is used. */
+   until one of the two is authorized. The Usage button shows how much of the plan's limits is used.
+   It is a conversation: earlier turns go with every request, and so do the files attached to it (papers, data,
+   figures), which the server keeps per conversation id. The conversation survives a reload. Claude never runs
+   anything: answers with a script offer "Put in editor"; the user runs it with Run or /run. */
 const ASSIST = (() => {
   let hooks = null, st = null, busy = false, pollTimer = null, pollUntil = 0;
+  // the conversation: [{role: "user" | "assistant", text, label?, code?, lang?, meta?}], its id and attachments
+  const KEY = "studioClaudeChat";
+  let conv = "", history = [], files = [];
+  const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
+  function saveChat() {
+    try { localStorage.setItem(KEY, JSON.stringify({ conv, history: history.slice(-40), files })); } catch (e) { /* full */ }
+  }
   const $ = (s) => document.querySelector(s);
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -21,8 +31,15 @@ const ASSIST = (() => {
       const blocks = p.trim().split(/\n{2,}/);
       for (const b of blocks) {
         if (!b.trim()) continue;
-        let h = esc(b).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-        if (/^\s*([-*]|\d+\.)\s/.test(b)) {
+        let h = esc(b).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+          .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>");
+        const hm = /^#{1,4}\s+(.*)$/.exec(h.split("\n")[0]);
+        if (hm) {
+          html += `<h5>${hm[1]}</h5>`;
+          h = h.split("\n").slice(1).join("\n");
+          if (!h.trim()) continue;
+        }
+        if (/^\s*([-*]|\d+\.)\s/.test(h)) {
           h = "<ul>" + h.split(/\n/).map((l) => `<li>${l.replace(/^\s*([-*]|\d+\.)\s+/, "")}</li>`).join("") + "</ul>";
         } else h = `<p>${h.replace(/\n/g, "<br>")}</p>`;
         html += h;
@@ -142,25 +159,63 @@ const ASSIST = (() => {
     log.scrollTop = log.scrollHeight;
     $("#asEmpty").hidden = true;
     $("#asClear").hidden = false;
+    $("#asClear").title = "Start a new conversation (forgets the attachments too)";
     return d;
   }
 
+  const MODE_LABEL = { chat: "", generate: "Write", fix: "Fix", explain: "Explain", improve: "Review" };
+  function showUser(t) {
+    const label = t.label ? `<span class="amode">${esc(t.label)}</span>` : "";
+    const att = t.files && t.files.length ? `<span class="afref">📎 ${esc(t.files.join(", "))}</span>` : "";
+    addMsg("user", label + esc(t.shown || t.text) + att);
+  }
+  function showClaude(t) {
+    const acts = document.createElement("div");
+    acts.className = "aacts";
+    const mk = (txt, cls, fn, title) => {
+      const b = document.createElement("button"); b.className = "btn small " + cls; b.textContent = txt;
+      if (title) b.title = title;
+      b.addEventListener("click", fn); acts.appendChild(b); return b;
+    };
+    if (t.code) {
+      mk("Put in editor", "primary", () => { hooks.setScript(t.code, t.lang); hooks.toast("Script in the editor: press Run (or type /run in the console) to start it"); },
+        "Replace the script in the editor with this one. It does not start a run.");
+      mk("Copy script", "", () => navigator.clipboard && navigator.clipboard.writeText(t.code));
+    } else {
+      mk("Copy", "", () => navigator.clipboard && navigator.clipboard.writeText(t.text));
+    }
+    if (t.meta) {
+      const meta = document.createElement("div");
+      meta.className = "ameta";
+      meta.textContent = t.meta;
+      acts.appendChild(meta);
+    }
+    addMsg("claude", md(t.text), acts);
+  }
+
   async function send() {
+    if (busy) return;
     if (!st || !st.preferred) { refresh(true); return; }
     const req = $("#asInput").value.trim();
     const mode = document.querySelector('input[name="asMode"]:checked').value;
-    if (!req && mode === "generate") { $("#asInput").focus(); return; }
-    const withScript = $("#asScript").checked || mode !== "generate";
+    if (!req && mode === "chat") { $("#asInput").focus(); return; }
+    if (files.some((f) => f.busy)) { hooks.toast("Wait until the attachments are uploaded"); return; }
+    const withScript = $("#asScript").checked || mode !== "chat";
     const body = {
-      mode, request: req, backend: $("#asBackend").value,
+      mode, request: req, backend: $("#asBackend").value, conv,
       script: withScript ? hooks.getScript().text : "", lang: hooks.getScript().lang,
-      error: mode === "fix" ? hooks.lastError() : "", include_log: $("#asLog2").checked,
+      error: mode === "fix" ? hooks.lastError() : "", include_results: $("#asResults").checked,
+      history: history.map((h) => ({ role: h.role, text: h.text })),
     };
-    const label = { generate: "Write", fix: "Fix", explain: "Explain", improve: "Review" }[mode];
-    addMsg("user", `<span class="amode">${label}</span>${esc(req || (mode === "fix" ? "the current script" : "the current script"))}`);
+    const shown = req || "the script in the editor";
+    // what the history keeps of this turn: the words, plus a note of what went with them
+    const notes = [withScript ? "(the script in the editor was included)" : "", body.include_results ? "(the run results were included)" : ""].filter(Boolean);
+    const turn = { role: "user", label: MODE_LABEL[mode], shown, text: [MODE_LABEL[mode] ? `[${MODE_LABEL[mode]}] ${shown}` : shown, ...notes].join(" "),
+      files: files.map((f) => f.name) };
+    showUser(turn);
     $("#asInput").value = "";
     busy = true; $("#asSend").disabled = true;
-    const wait = addMsg("wait", "Working");
+    const wait = addMsg("wait", files.some((f) => /\.pdf$/i.test(f.name)) ? "Reading the attachments" : "Thinking");
     const t0 = performance.now();
     let r;
     try { r = await hooks.api("/api/assist", { body }); } catch (e) { r = { error: e.message }; }
@@ -169,26 +224,88 @@ const ASSIST = (() => {
     refresh();
     if (r.usage && !$("#asUsage").hidden) showUsage(r.usage);
     if (r.error) { addMsg("err", esc(r.error)); return; }
-    const acts = document.createElement("div");
-    acts.className = "aacts";
-    if (r.code) {
-      const mk = (txt, cls, fn) => { const b = document.createElement("button"); b.className = "btn small " + cls; b.textContent = txt; b.addEventListener("click", fn); acts.appendChild(b); };
-      mk("Put in editor", "", () => hooks.setScript(r.code, r.lang));
-      mk("Put in editor and run", "primary", () => { hooks.setScript(r.code, r.lang); hooks.run(); });
-      mk("Copy", "", () => navigator.clipboard && navigator.clipboard.writeText(r.code));
+    if (Array.isArray(r.attachments)) {   // files the server no longer has (cleaned up) drop out of the list
+      const have = new Set(r.attachments);
+      files = files.filter((f) => have.has(f.name) || !turn.files.includes(f.name)); renderFiles();
     }
     const sec = ((performance.now() - t0) / 1000).toFixed(0);
-    const meta = document.createElement("div");
-    meta.className = "ameta";
-    meta.textContent = `${r.backend === "cli" ? "Claude Code" : "API"} · ${sec} s`;
-    acts.appendChild(meta);
-    addMsg("claude", md(r.text), acts);
+    const ans = { role: "assistant", text: r.text, code: r.code, lang: r.lang, meta: `${r.backend === "cli" ? "Claude Code" : "API"} · ${sec} s` };
+    history.push(turn, ans);
+    saveChat();
+    showClaude(ans);
+  }
+
+  // ---- attachments
+  const KB = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1e3)) + " kB";
+  function renderFiles() {
+    const box = $("#asFiles");
+    box.innerHTML = "";
+    box.hidden = !files.length;
+    for (const f of files) {
+      const d = document.createElement("span");
+      d.className = "afile" + (f.busy ? " busy" : "");
+      d.title = f.busy ? "Uploading…" : `${f.name} (${KB(f.size)}). Claude reads it with every request in this conversation.`;
+      d.innerHTML = `<span>${esc(f.name)}</span><small>${f.busy ? "…" : KB(f.size)}</small>`;
+      const x = document.createElement("button");
+      x.type = "button"; x.textContent = "×"; x.title = "Remove"; x.setAttribute("aria-label", "Remove " + f.name);
+      x.addEventListener("click", async () => {
+        files = files.filter((g) => g !== f); renderFiles(); saveChat();
+        try { await hooks.api("/api/assistant/detach", { body: { conv, name: f.name } }); } catch (e) { /* gone already */ }
+      });
+      d.appendChild(x);
+      box.appendChild(d);
+    }
+  }
+  const readB64 = (file) => new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(",", 2)[1] || "");
+    fr.onerror = () => rej(fr.error);
+    fr.readAsDataURL(file);
+  });
+  async function attachFiles(list) {
+    for (const file of list) {
+      if (file.size > 25e6) { addMsg("err", esc(`${file.name} is too large (max 25 MB)`)); continue; }
+      const f = { name: file.name, size: file.size, busy: true };
+      files = files.filter((g) => g.name !== file.name).concat(f);
+      renderFiles();
+      let r;
+      try { r = await hooks.api("/api/assistant/attach", { body: { conv, name: file.name, data: await readB64(file) } }); } catch (e) { r = { error: e.message }; }
+      if (r.error) { files = files.filter((g) => g !== f); addMsg("err", esc(r.error)); }
+      else { f.name = r.name; f.size = r.size; delete f.busy; files = files.filter((g) => g === f || g.name !== f.name); }
+      renderFiles();
+      saveChat();
+    }
+  }
+
+  function clearChat() {
+    const old = conv;
+    hooks.api("/api/assistant/detach", { body: { conv: old } }).catch(() => {});
+    conv = newId(); history = []; files = [];
+    saveChat(); renderFiles();
+    document.querySelectorAll("#asLog .amsg").forEach((m) => m.remove());
+    $("#asClear").hidden = true;
+    refresh();
   }
 
   function init(h) {
     hooks = h;
     $("#asSend").addEventListener("click", send);
-    $("#asInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+    // Enter sends, Shift+Enter starts a new line; the key never reaches the app's own shortcuts
+    $("#asInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); send(); }
+    });
+    $("#asFileInput").addEventListener("change", (e) => { const l = [...e.target.files]; e.target.value = ""; attachFiles(l); });
+    const panel = document.querySelector(".assistant");
+    panel.addEventListener("dragover", (e) => {
+      if (!st || !st.preferred || ![...e.dataTransfer.types].includes("Files")) return;
+      e.preventDefault(); panel.classList.add("drop");
+    });
+    panel.addEventListener("dragleave", (e) => { if (!panel.contains(e.relatedTarget)) panel.classList.remove("drop"); });
+    panel.addEventListener("drop", (e) => {
+      panel.classList.remove("drop");
+      if (!st || !st.preferred || !e.dataTransfer.files.length) return;
+      e.preventDefault(); attachFiles([...e.dataTransfer.files]);
+    });
     $("#asBackend").addEventListener("change", () => { refresh(); hooks.saveSetting("assistant_backend", $("#asBackend").value); });
     $("#asRecheck").addEventListener("click", () => refresh(true));
     $("#asLogin").addEventListener("click", async () => {
@@ -227,24 +344,29 @@ const ASSIST = (() => {
     document.querySelectorAll('input[name="asMode"]').forEach((r) => r.addEventListener("change", () => {
       const m = document.querySelector('input[name="asMode"]:checked').value;
       $("#asInput").placeholder = {
-        generate: "Describe the simulation…",
+        chat: "Ask a question or describe a simulation…",
         fix: "What goes wrong? (optional)",
         explain: "What should be explained? (optional)",
         improve: "What should be checked? (optional)",
       }[m];
-      $("#asScriptRow").hidden = m !== "generate";
+      $("#asScriptRow").hidden = m !== "chat";
     }));
-    $("#asClear").addEventListener("click", () => {
-      document.querySelectorAll("#asLog .amsg").forEach((m) => m.remove());
-      $("#asClear").hidden = true;
-      refresh();
-    });
+    $("#asClear").addEventListener("click", clearChat);
     document.querySelectorAll("#asExamples .chip").forEach((c) => c.addEventListener("click", () => {
-      $("#asInput").value = c.textContent; $("#asInput").focus();
+      $("#asInput").value = c.textContent;
+      if (c.dataset.results) $("#asResults").checked = true;
+      $("#asInput").focus();
     }));
     if (!/Win/.test(navigator.platform)) $("#asCliHelp").innerHTML = "In a terminal: <code>curl -fsSL https://claude.ai/install.sh | bash</code>";
     const saved = h.settings().assistant_backend;
     if (saved) $("#asBackend").value = saved;
+    let kept = null;
+    try { kept = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { kept = null; }
+    if (kept && /^[a-f0-9]{8,32}$/.test(kept.conv || "")) {
+      conv = kept.conv; history = Array.isArray(kept.history) ? kept.history : []; files = Array.isArray(kept.files) ? kept.files.filter((f) => !f.busy) : [];
+      for (const t of history) (t.role === "user" ? showUser : showClaude)(t);
+    } else conv = newId();
+    renderFiles();
     refresh();
   }
   return { init, refresh };

@@ -124,8 +124,9 @@ class TestTwoSublattice(unittest.TestCase):
     def test_inhomogeneous_exchange_spiral(self):
         """Neel spiral m1 = (cos kx, 0, sin kx) = -m2: energy density aex k^2 per sublattice - afmex_nn k^2."""
         n = 64
-        w = World(cellsize=(1e-9, 1e-9, 1e-9), pbc_repetitions=(1, 0, 0))
+        w = World(cellsize=(1e-9, 1e-9, 1e-9))
         afm = Antiferromagnet(w, Grid((n, 1, 1)))
+        w.set_pbc((1, 0, 0))
         for s in afm.sublattices:
             s.msat = 400e3
             s.aex = 4e-12

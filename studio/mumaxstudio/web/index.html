@@ -38,6 +38,7 @@
     <symbol id="i-step-fwd" viewBox="0 0 24 24"><path d="m7 6 8 6-8 6zM17 6v12"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
   </defs>
 </svg>
@@ -55,7 +56,7 @@
     <svg><use href="#i-folder"/></svg><span class="fc-lbl">saves to</span><span class="fc-path" id="outPath">…</span>
   </button>
   <div class="transport" role="group" aria-label="Simulation control">
-    <button id="btnRun" class="tbtn run" title="Run the script (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Run</span></button>
+    <button id="btnRun" class="tbtn run" title="Run the script (or type /run in the console)"><svg><use href="#i-play"/></svg><span>Run</span></button>
     <button id="btnPause" class="tbtn" title="Pause / resume" disabled><svg><use href="#i-pause"/></svg><span>Pause</span></button>
     <button id="btnStop" class="tbtn stop" title="Stop" disabled><svg><use href="#i-stop"/></svg><span>Stop</span></button>
     <span id="statePill" class="state idle" role="status">idle</span>
@@ -326,7 +327,7 @@
         <ol>
           <li><b>Geometry</b>: set the mesh and build the magnet from shapes, imported STL models, images or your own <code>inside(x, y, z)</code> code.</li>
           <li><b>Setup</b>: material, initial state, what to record. <b>Drive</b>: fields and currents with any pulse shape.</li>
-          <li>Press <b>Run</b>. Before it starts, the app shows where the results go (<code>&lt;folder&gt;\&lt;name&gt;.out</code>); the folder chip in the top bar changes it. The script is generated (see the <b>Script</b> page) and runs on the chosen device. Ctrl+Enter runs whatever is in the editor.</li>
+          <li>Press <b>Run</b>. Before it starts, the app shows where the results go (<code>&lt;folder&gt;\&lt;name&gt;.out</code>); the folder chip in the top bar changes it. The script is generated (see the <b>Script</b> page) and runs on the chosen device. Typing <code>/run</code> in the console does the same.</li>
           <li>While it runs, type commands in the console, e.g. <code>B_ext = vector(0, 0, 0.1)</code>, <code>Save(m)</code>, <code>Run(1e-9)</code>.</li>
         </ol>
         <h3>Pulse and waveform functions</h3>
@@ -480,7 +481,7 @@ print(magnet.magnetization.average())</pre>
     <div class="log" id="log" role="log" aria-live="polite"></div>
     <div class="cmdline">
       <span class="prompt">&gt;</span>
-      <input id="cmd" placeholder="B_ext = vector(0, 0, 0.1)    Save(m)    Run(1e-9)    (up / down: history)" spellcheck="false" aria-label="Command">
+      <input id="cmd" placeholder="mumax command, /run, cd &lt;folder&gt;, mkdir, /help" spellcheck="false" aria-label="Command">
     </div>
   </section>
 
@@ -507,11 +508,13 @@ print(magnet.magnetization.average())</pre>
     </div>
     <div class="alog" id="asLog">
       <div class="aempty" id="asEmpty">
-        <p>Describe a simulation and Claude writes the script. Use <b>Fix</b>, <b>Explain</b> or <b>Review</b> for the script in the editor.</p>
+        <p>Ask about micromagnetics, spintronics or your results, or describe a simulation and Claude writes the script.
+          Attach papers to build a script from them. <b>Fix</b>, <b>Explain</b> and <b>Review</b> work on the script in the editor.</p>
         <div class="atry" id="asExamples">
-          <button class="chip" type="button">Relax a 200 nm permalloy square and save m</button>
           <button class="chip" type="button">Switch a CoFeB disk with a 2 ns SOT pulse</button>
           <button class="chip" type="button">Skyrmion in a 100 nm disk with DMI</button>
+          <button class="chip" type="button">Why must the cell size stay below the exchange length?</button>
+          <button class="chip" type="button" data-results="1">What does my last run show?</button>
         </div>
         <details class="aconnect"><summary class="small">Let Claude run simulations itself</summary>
           <p class="small muted">Gives Claude Desktop or Claude Code tools to run scripts and read the results.</p>
@@ -541,17 +544,19 @@ print(magnet.magnetization.average())</pre>
     </div>
     <div class="acompose">
       <div class="amodes" role="radiogroup" aria-label="Request type">
-        <label><input type="radio" name="asMode" value="generate" checked><span>Write</span></label>
+        <label title="Questions, and new scripts"><input type="radio" name="asMode" value="chat" checked><span>Chat</span></label>
         <label><input type="radio" name="asMode" value="fix"><span>Fix</span></label>
         <label><input type="radio" name="asMode" value="explain"><span>Explain</span></label>
         <label><input type="radio" name="asMode" value="improve"><span>Review</span></label>
       </div>
-      <textarea id="asInput" rows="2" disabled placeholder="Describe the simulation…"></textarea>
+      <div class="afiles" id="asFiles" hidden></div>
+      <textarea id="asInput" rows="2" disabled placeholder="Ask a question or describe a simulation…"></textarea>
       <div class="arow">
+        <label class="filebtn btn small icon" id="asAttach" title="Attach papers, data or figures (PDF, text, images). Claude reads them with every request in this conversation. You can also drop files here."><svg><use href="#i-clip"/></svg><input type="file" id="asFileInput" multiple accept=".pdf,.txt,.md,.tex,.bib,.mx3,.py,.csv,.dat,.json,.m,.log,.png,.jpg,.jpeg,.gif,.webp" aria-label="Attach files"></label>
         <label class="check small" id="asScriptRow" title="Send the script in the editor with the request"><input type="checkbox" id="asScript"> script</label>
-        <label class="check small" title="Send the last run's log with the request"><input type="checkbox" id="asLog2"> run log</label>
+        <label class="check small" title="Send the current run with the request: its state, table, output files and log"><input type="checkbox" id="asResults"> results</label>
         <span class="spacer"></span>
-        <button class="btn primary small" id="asSend" type="button" disabled title="Send (Ctrl+Enter). Nothing leaves this computer until you press it.">Send</button>
+        <button class="btn primary small" id="asSend" type="button" disabled title="Send (Enter; Shift+Enter for a new line). Nothing leaves this computer until you press it.">Send</button>
       </div>
     </div>
   </section>

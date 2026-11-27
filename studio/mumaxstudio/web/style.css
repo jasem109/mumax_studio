@@ -588,3 +588,17 @@ textarea#asInput:disabled { opacity: .6; }
 .vidprog { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .vidprog[hidden] { display: none; }
 .vidprog div { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+
+/* attachments of the Claude conversation */
+.afiles { display: flex; flex-wrap: wrap; gap: 5px; }
+.afiles[hidden] { display: none; }
+.afile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--line-2); border-radius: 999px;
+  padding: 1px 4px 1px 9px; font-size: 11.5px; background: var(--code-bg); }
+.afile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.afile small { color: var(--muted); }
+.afile button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 3px; font-size: 13px; line-height: 1; }
+.afile button:hover { color: var(--bad); }
+.afile.busy { opacity: .6; }
+.assistant.drop .acompose { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.amsg h5 { font-size: 12.5px; margin: 8px 0 4px; }
+.amsg.user .afref { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }

@@ -328,10 +328,7 @@ editor.addEventListener("keydown", (e) => {
     e.preventDefault();
     editor.setRangeText("    ", editor.selectionStart, editor.selectionEnd, "end");
     syncEditor();
-  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && document.activeElement !== editor) { e.preventDefault(); run(); }
+  }
 });
 function setEditor(text, lang) {
   editor.value = text;
@@ -669,16 +666,63 @@ function logLine(text) {
 }
 const hist = [];
 let histPos = 0;
+// Console commands of the app itself; everything else is a mumax command for the running simulation.
+const CONSOLE_HELP = [
+  "// /run                 run the script in the editor (same as the Run button)",
+  "// /pause  /resume  /stop",
+  "// /clear               clear the console",
+  "// pwd                  show the output folder",
+  "// cd <folder>          make <folder> the output folder (relative to the current one, or a full path; cd .. goes up)",
+  "// mkdir <folder>       create a folder (then cd into it)",
+  "// ls [folder]          list a folder",
+  "// anything else runs as a mumax command, e.g. B_ext = vector(0, 0, 0.1), Save(m), Run(1e-9)",
+];
+const SHELL_RE = /^(cd|mkdir|md|pwd|ls|dir)(\s|$)/i;
+async function consoleCommand(cmd) {
+  if (cmd.startsWith("/")) {
+    const w = cmd.slice(1).trim().split(/\s+/)[0].toLowerCase();
+    logLine("> " + cmd);
+    const active = state === "running" || state === "paused";
+    if (w === "run") run();
+    else if (w === "stop" || w === "pause" || w === "resume") {
+      if (!active) { logLine("// nothing is running"); return; }
+      const path = w === "stop" ? "/api/stop" : w === "pause" ? "/api/pause" : "/api/resume";
+      try { await api(path, { body: {} }); } catch (err) { logLine("ERROR: " + err.message); }
+      pollSoon();
+    } else if (w === "clear" || w === "cls") logEl.textContent = "";
+    else if (w === "help" || w === "?" || !w) CONSOLE_HELP.forEach(logLine);
+    else logLine(`ERROR: unknown command /${w} (type /help)`);
+    return;
+  }
+  if (/^(clear|cls)$/i.test(cmd)) { logEl.textContent = ""; return; }
+  if (/^help$/i.test(cmd)) { CONSOLE_HELP.forEach(logLine); return; }
+  if (SHELL_RE.test(cmd)) {
+    logLine("> " + cmd);
+    try {
+      const r = await api("/api/shell", { body: { cmd } });
+      (r.lines || []).forEach(logLine);
+      if (r.changed) {
+        workspace = r.workspace; folderChosen = true;
+        refreshOutPath();
+        if (page === "files") loadFiles();
+        toast("Output folder: " + r.workspace);
+      }
+    } catch (err) { logLine("ERROR: " + err.message); }
+    return;
+  }
+  try { await api("/api/command", { body: { cmd, lang: $("#selLang").value } }); } catch (err) { logLine("ERROR: " + err.message); }
+  pollSoon();
+}
 $("#cmd").addEventListener("keydown", async (e) => {
   const inp = e.target;
   if (e.key === "Enter") {
     const cmd = inp.value.trim();
     if (!cmd) return;
+    e.preventDefault();
     hist.push(cmd);
     histPos = hist.length;
     inp.value = "";
-    try { await api("/api/command", { body: { cmd, lang: $("#selLang").value } }); } catch (err) { logLine("ERROR: " + err.message); }
-    pollSoon();
+    await consoleCommand(cmd);
   } else if (e.key === "ArrowUp") {
     if (histPos > 0) { histPos--; inp.value = hist[histPos]; }
     e.preventDefault();
@@ -1525,7 +1569,8 @@ async function init() {
   const sel = $("#selExample");
   const groups = {};
   for (const ex of inf.examples) {
-    const g = ex.includes("/") ? "From mumax.github.io/examples" : "mumax Studio";
+    const g = ex.startsWith("mumaxplus_official/") ? "From the mumax+ repository"
+      : ex.includes("/") ? "From mumax.github.io/examples" : "mumax Studio";
     if (!groups[g]) { groups[g] = document.createElement("optgroup"); groups[g].label = g; sel.appendChild(groups[g]); }
     const o = document.createElement("option");
     o.value = ex; o.textContent = ex.split("/").pop().replace(/\.(mx3|py)$/, "").replace(/^\d+_/, "").replace(/_/g, " ");
@@ -1540,7 +1585,7 @@ async function init() {
   fillDevices(inf);
   if (settings.layout) LAYOUT.restore(settings.layout);
   ASSIST.init({
-    api, saveSetting, settings: () => settings, run,
+    api, saveSetting, settings: () => settings, toast,
     getScript: () => ({ text: editor.value, lang: $("#selLang").value }),
     setScript: (text, lang) => { setEditor(text, lang || "mx3"); lastGenerated = null; saveDraft(); switchTab("script"); },
     lastError: () => lastError,

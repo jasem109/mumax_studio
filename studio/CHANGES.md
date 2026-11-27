@@ -2,6 +2,33 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.1
+
+- **All of mumax+.** mumax Studio now ships the Python package of mumax+ 1.2.2 itself and runs it on its own
+  NumPy (CPU) / CuPy (NVIDIA GPU) engine, a port of the mumax+ C++/CUDA core. Every part of the API works:
+  ferromagnets, antiferromagnets, **altermagnets**, **non-collinear antiferromagnets (NcAfm)** and ferrimagnets;
+  inter-region exchange (`inter_exchange`, `scale_exchange`, `inter_afmex_nn`, ...), interfacial/bulk and
+  inter-sublattice DMI (`dmi_tensor`, `dmi_vector`), cubic and uniaxial anisotropy, Zhang-Li and Slonczewski
+  torques, thermal noise, magnetoelastic coupling with rigid strain or full **elastodynamics** (strain, stress,
+  traction, damping, energies, Poynting vector), the **Poisson solver** with AMR, stray fields between any
+  magnets, periodic boundaries (`set_pbc`, mastergrid), `minimize`, `relax`, the **moving window**,
+  `mumaxplus.util` (shapes, configurations, `plot_field`, **MFM**, **Voronoi** grains, formulary) and every
+  field, energy and torque quantity, Néel/octupole vectors and angle fields. Scripts written for mumax+ run
+  unchanged, and the upstream mumax+ test suite passes (see README for the exceptions at float32 rounding level).
+- **Examples.** The examples of the mumax+ repository are in the examples list under `mumaxplus_official/`.
+- **Claude answers questions, not only scripts.** The panel is now a conversation: ask about micromagnetics,
+  spintronics, numerics, the app or your results, and follow up; earlier turns are remembered (also after a
+  restart) until you start a new conversation with ⟲. *Chat* replaces *Write*; *Fix*, *Explain* and *Review* stay.
+- **Attach papers.** The paper-clip button, or dropping files on the panel, attaches PDFs, data and text files and
+  figures. Claude reads them with every request and builds scripts from them, saying where each value comes from.
+- **Results for Claude.** Tick *results* to send the current run: its state, mesh, table (columns, first and last
+  rows), output files and log, so Claude can explain what happened.
+- **Sending never starts a simulation.** Ctrl+Enter used to start a run even while typing to Claude. Runs now start
+  only with the Run button or `/run` in the console; Claude's scripts go to the editor with *Put in editor*.
+  In the Claude box, Enter sends and Shift+Enter starts a new line.
+- **Console commands.** `/run`, `/pause`, `/resume`, `/stop`, `/clear` and `/help`; `pwd`, `cd <folder>`
+  (relative or full path, `cd ..`), `mkdir <folder>` and `ls` show and change the output folder.
+
 ## 0.5.0
 
 - **Analysis in the table plot.** A new "show" menu next to "against" turns the plotted columns into: d/dt and

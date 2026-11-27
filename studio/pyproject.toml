@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mumax-studio"
-version = "0.5.0"
+version = "0.5.1"
 description = "Micromagnetic simulation studio: a Python (NumPy/CuPy) port of the mumax3 STT-SOT engine with a browser GUI"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,6 +14,7 @@ dependencies = [
     "scipy>=1.8",      # multithreaded FFT on CPU (optional at runtime, strongly recommended)
     "pillow>=9",       # PNG snapshots and ImageShape()
     "matplotlib>=3.5", # figures from mumax+ style scripts
+    "tqdm>=4",         # progress bars in the mumax+ examples
 ]
 
 [project.urls]
@@ -29,7 +30,8 @@ claude = ["anthropic>=0.70"]      # Claude assistant with an API key
 mumax-studio = "mumaxstudio.__main__:main"
 
 [tool.setuptools]
-packages = ["mumaxstudio"]
+packages = ["mumaxstudio", "mumaxstudio.plus_engine", "mumaxstudio.mumaxplus", "mumaxstudio.mumaxplus.util"]
 
 [tool.setuptools.package-data]
-mumaxstudio = ["web/*", "examples/*", "examples/mumax3_official/*", "examples/mumaxplus/*"]
+mumaxstudio = ["web/*", "examples/*", "examples/mumax3_official/*", "examples/mumaxplus_official/*"]
+"mumaxstudio.mumaxplus" = ["LICENSE"]

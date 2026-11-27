@@ -144,11 +144,14 @@ class TestPlusExtras(unittest.TestCase):
         mag.msat = 800e3
         mag.aex = 13e-12
         self.assertTrue(np.all(np.isfinite(mag.magnetization.eval())))
+        # mumax+ has no 256-region limit (that is mumax3's): 300 regions with exchange set between two of them
         w2 = World(cellsize=(1e-9, 1e-9, 1e-9))
         mag2 = Ferromagnet(w2, Grid((40, 20, 1)), regions=np.arange(800).reshape(1, 20, 40) % 300)
         mag2.msat = 800e3
-        with self.assertRaisesRegex(ValueError, "256"):
-            mag2.magnetization.eval()
+        mag2.aex = 13e-12
+        mag2.inter_exchange.set_between(0, 299, 5e-12)
+        self.assertEqual(mag2.inter_exchange.get_between(299, 0), 5e-12)
+        self.assertTrue(np.all(np.isfinite(mag2.exchange_field.eval())))
 
     def test_plain_python_detection(self):
         s = Simulation(backend="cpu", precision="double", log=lambda m: None)
@@ -174,7 +177,7 @@ class TestAssistantHelpers(Isolated):
             self.assertFalse(st["authorized"])
             self.assertEqual(st["preferred"], "")
             with self.assertRaises(assistant.AssistantError):
-                assistant.ask("generate", "a disk")
+                assistant.ask("chat", "a disk")
             # signed in, but without a Pro / Max plan: still locked
             self.assertFalse(assistant.subscription_ok({"logged_in": True, "plan": "free", "method": "", "account": ""}))
             self.assertTrue(assistant.subscription_ok({"logged_in": True, "plan": "pro", "method": "", "account": ""}))

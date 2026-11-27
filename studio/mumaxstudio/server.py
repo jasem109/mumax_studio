@@ -7,6 +7,7 @@ blocks cross-site requests and DNS rebinding.  By default only 127.0.0.1 is boun
 from __future__ import annotations
 
 import json
+import re
 import mimetypes
 import os
 import secrets
@@ -67,11 +68,13 @@ EXAMPLES = os.path.join(HERE, "examples")
 
 
 def list_examples():
-    """Example scripts, own ones first, then the mumax3 website examples as "mumax3_official/<name>"."""
+    """Example scripts, own ones first, then the mumax3 website examples as "mumax3_official/<name>" and the mumax+
+    repository examples as "mumaxplus_official/<name>"."""
     out = sorted(f for f in os.listdir(EXAMPLES) if f.endswith((".mx3", ".py")))
-    sub = os.path.join(EXAMPLES, "mumax3_official")
-    if os.path.isdir(sub):
-        out += ["mumax3_official/" + f for f in sorted(os.listdir(sub)) if f.endswith((".mx3", ".py"))]
+    for group in ("mumax3_official", "mumaxplus_official"):
+        sub = os.path.join(EXAMPLES, group)
+        if os.path.isdir(sub):
+            out += [group + "/" + f for f in sorted(os.listdir(sub)) if f.endswith((".mx3", ".py"))]
     return out
 OUTPUT_EXT = (".ovf", ".png", ".txt", ".npy", ".csv")
 
@@ -457,20 +460,134 @@ class Studio:
             return {"error": str(e)}
         raise ValueError("target must be desktop or code")
 
+    def _run_context(self, with_results):
+        """What Claude is told about the user's simulation: the output folder always; with `results` also the state
+        of the current run, its table (columns, first and last rows) and the files it wrote."""
+        lines = [f"Output folder: {self.workspace}" + ("" if self.folder_chosen else " (not chosen yet)")]
+        j = self.job
+        if not with_results or j is None:
+            return "\n".join(lines)
+        sim = j.view
+        st = sim.status()
+        state = "paused" if j.control.paused.is_set() and j.running else ("running" if j.running else "finished")
+        lines.append(f"Run '{j.name}' ({state}) writing to {j.out_dir}")
+        mesh = st.get("mesh")
+        if mesh:
+            lines.append(f"Mesh: {mesh['n'][0]}x{mesh['n'][1]}x{mesh['n'][2]} cells of "
+                         f"{mesh['cell'][0]:.3g} x {mesh['cell'][1]:.3g} x {mesh['cell'][2]:.3g} m, PBC {mesh['pbc']}")
+        lines.append(f"t = {st['t']:.6g} s, {st['step']} steps, dt = {st['dt']:.3g} s, max torque = "
+                     f"{st['maxTorque']:.3g} T, solver {st['solver']}, device {st['device']}")
+        hdr = sim.table_header
+        rows = list(sim.table_rows) if hdr else []
+        if hdr:
+            cols = [f"{n} ({u})" for n, u in hdr]
+            lines.append(f"Table ({len(rows)} rows), columns: " + ", ".join(cols))
+            pick = rows if len(rows) <= 24 else rows[:4] + rows[-20:]
+            for i, r in enumerate(pick):
+                if len(rows) > 24 and i == 4:
+                    lines.append(f"... {len(rows) - 24} rows left out ...")
+                lines.append("  " + "\t".join(f"{v:.6g}" if isinstance(v, (int, float)) else str(v) for v in r))
+        if os.path.isdir(j.out_dir):
+            names = sorted(os.listdir(j.out_dir))
+            lines.append(f"Files in the output directory ({len(names)}): " + ", ".join(names[:60])
+                         + (" ..." if len(names) > 60 else ""))
+        return "\n".join(lines)
+
     def api_assist(self, q, body):
         from . import assistant
 
         log = ""
-        if body.get("include_log") and self.job is not None:
+        with_results = bool(body.get("include_results") or body.get("include_log"))
+        if with_results and self.job is not None:
             with self.job.lock:
                 log = "\n".join(t for _, t in self.job.log[-60:])
+        hist = body.get("history")
         try:
-            return assistant.ask(mode=str(body.get("mode", "generate")), request=str(body.get("request", "")),
+            return assistant.ask(mode=str(body.get("mode", "chat")), request=str(body.get("request", "")),
                                  script=str(body.get("script", "")), lang=str(body.get("lang", "mx3")),
                                  error=str(body.get("error", "") or ""), log=log,
-                                 backend=str(body.get("backend", "auto")))
+                                 backend=str(body.get("backend", "auto")),
+                                 history=hist if isinstance(hist, list) else None,
+                                 conv=str(body.get("conv", "") or ""), context=self._run_context(with_results))
         except assistant.AssistantError as e:
             return {"error": str(e)}
+
+    def api_assistant_attach(self, q, body):
+        """Attach a file (paper, data, figure) to the Claude conversation `conv`."""
+        import base64
+
+        from . import assistant
+
+        try:
+            data = base64.b64decode(str(body.get("data", "")), validate=True)
+            return assistant.attach(str(body.get("conv", "")), str(body.get("name", "")), data)
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
+
+    def api_assistant_detach(self, q, body):
+        from . import assistant
+
+        try:
+            assistant.detach(str(body.get("conv", "")), body.get("name") or None)
+        except assistant.AssistantError as e:
+            return {"error": str(e)}
+        return {"ok": True}
+
+    # ---------------------------------------------------------------- console shell: cd, mkdir, pwd, ls
+    SHELL_COMMANDS = ("cd", "mkdir", "md", "pwd", "ls", "dir")
+
+    def _shell_path(self, arg):
+        raw = os.path.expandvars(os.path.expanduser(arg.strip().strip('"').strip("'")))
+        if sys.platform == "win32" and re.fullmatch(r"[A-Za-z]:", raw):
+            raw += "\\"
+        return os.path.abspath(raw if os.path.isabs(raw) else os.path.join(self.workspace, raw))
+
+    def api_shell(self, q, body):
+        """The console's folder commands. cd switches the output folder (it must exist), mkdir creates a folder
+        (relative to the output folder), pwd shows it, ls lists a folder."""
+        line = str(body.get("cmd", "")).strip()
+        cmd, _, arg = line.partition(" ")
+        cmd, arg = cmd.lower(), arg.strip()
+        if cmd == "pwd" or (cmd == "cd" and not arg):
+            return {"lines": [self.workspace + ("" if self.folder_chosen else "   (not chosen yet: cd <folder>)")],
+                    "workspace": self.workspace}
+        if cmd == "cd":
+            p = self._shell_path(arg)
+            if not os.path.isdir(p):
+                raise FileNotFoundError(f"{p} (create it with: mkdir {arg})")
+            r = self.api_workspace({}, {"path": p})
+            return {"lines": [f"output folder: {r['workspace']}"], "workspace": r["workspace"], "changed": True}
+        if cmd in ("mkdir", "md"):
+            parts = arg.split(None, 1)
+            if parts and parts[0] == "-p":
+                arg = parts[1] if len(parts) > 1 else ""
+            if not arg:
+                raise ValueError("usage: mkdir <folder>")
+            p = self._shell_path(arg)
+            if os.path.exists(p):
+                raise FileExistsError(f"{p} already exists")
+            os.makedirs(p)
+            return {"lines": [f"created {p}", f"switch to it with: cd {arg}"]}
+        if cmd in ("ls", "dir"):
+            p = self._shell_path(arg) if arg else self.workspace
+            if not os.path.isdir(p):
+                raise FileNotFoundError(p)
+            out = []
+            names = sorted(os.listdir(p), key=lambda n: (not os.path.isdir(os.path.join(p, n)), n.lower()))
+            for n in names[:300]:
+                f = os.path.join(p, n)
+                if os.path.isdir(f):
+                    out.append(n + os.sep)
+                else:
+                    try:
+                        size = os.path.getsize(f)
+                    except OSError:
+                        size = 0
+                    out.append(f"{n}  ({size / 1e6:.2f} MB)" if size >= 1e5 else f"{n}  ({size} B)")
+            if len(names) > 300:
+                out.append(f"... and {len(names) - 300} more")
+            return {"lines": [p + ":"] + (out or ["(empty)"])}
+        raise ValueError(f"unknown command {cmd}")
 
     # ---------------------------------------------------------------- API handlers
     def api_info(self, q, body):
@@ -853,6 +970,8 @@ class Studio:
         ("POST", "/api/assistant/connect"): "api_assistant_connect",
         ("POST", "/api/assistant/login"): "api_assistant_login", ("POST", "/api/assistant/logout"): "api_assistant_logout",
         ("GET", "/api/assistant/usage"): "api_assistant_usage",
+        ("POST", "/api/assistant/attach"): "api_assistant_attach", ("POST", "/api/assistant/detach"): "api_assistant_detach",
+        ("POST", "/api/shell"): "api_shell",
         ("GET", "/api/update"): "api_update", ("POST", "/api/update/start"): "api_update_start",
         ("GET", "/api/update/progress"): "api_update_progress", ("POST", "/api/update/apply"): "api_update_apply",
         ("POST", "/api/update/open"): "api_update_open",
@@ -934,6 +1053,8 @@ def make_handler(studio, allowed_hosts):
                 return self._send(404, {"error": f"not found: {e}"})
             except PermissionError as e:
                 return self._send(403, {"error": str(e)})
+            except FileExistsError as e:
+                return self._send(400, {"error": str(e)})
             except Exception as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
             if isinstance(res, bytes):
@@ -1134,6 +1255,12 @@ def _start(host, port, script, backend, precision, workspace):
     chosen = bool(workspace) or saved_workspace() is not None
     workspace = workspace or saved_workspace() or default_workspace()
     studio = Studio(workspace, backend, precision, script, folder_chosen=chosen)
+    try:
+        from .assistant import cleanup_attachments
+
+        cleanup_attachments()
+    except OSError:
+        pass
     httpd = None
     for p in range(port, port + 20):
         try:

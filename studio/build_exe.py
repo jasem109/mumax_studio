@@ -63,7 +63,11 @@ args = [
     "--add-data", f"{os.path.join(pkg, 'examples')}{sep}mumaxstudio/examples",
     "--collect-submodules", "scipy.fft",
     "--collect-submodules", "mumaxstudio",
+    "--add-data", f"{os.path.join(pkg, 'mumaxplus', 'LICENSE')}{sep}mumaxstudio/mumaxplus",
     "--hidden-import", "matplotlib.backends.backend_agg",
+    # imported only by user scripts (the mumax+ examples), so PyInstaller would not find them on its own
+    "--hidden-import", "tqdm", "--hidden-import", "tqdm.auto",
+    "--hidden-import", "scipy.signal", "--hidden-import", "mpl_toolkits.axes_grid1",
     "--exclude-module", "tkinter",
 ]
 if os.name == "nt":

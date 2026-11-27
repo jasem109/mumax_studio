@@ -15,14 +15,16 @@ repository and rewritten in Python.
   masks, and takes your own Python `inside(x, y, z)` code.
 * **Any drive.** Fields, spin-transfer and spin-orbit currents are built from terms: amplitude × waveform × spatial
   profile, with a library of pulse shapes, a live waveform/spectrum preview and custom Python field terms.
-* **mumax+ scripts.** `from mumaxplus import World, Grid, Ferromagnet` works: a reimplementation of the mumax+ Python
-  interface (ferromagnets, two-sublattice antiferro-/ferrimagnets) on the same engine.
+* **mumax+ scripts.** `import mumaxplus` works: mumax Studio ships the mumax+ 1.2.2 Python package and runs it on
+  its own CPU/GPU engine, so ferromagnets, antiferromagnets, altermagnets, NcAfm, elastodynamics, the Poisson solver,
+  moving windows, MFM, Voronoi grains and the rest of the API are all there.
 * **3D viewer for OVF files**, in the spirit of mumax-view: arrows, cones or cells, slicing, orbiting, time series,
   OVF 1/2 from the workspace or dragged in from anywhere.
 * **Dockable panels**: resize, minimise, maximise, close, drag next to each other; the layout is remembered.
 * **Claude assistant** (unlocked by signing in with a Claude Pro/Max account; a *Usage* button shows the plan's
-  5-hour and weekly usage in percent; an API key also works): describe a simulation
-  and get a script, or have one fixed, explained or reviewed. A built-in MCP server lets Claude Desktop / Claude
+  5-hour and weekly usage in percent; an API key also works): a conversation about micromagnetics, spintronics
+  and your results; describe a simulation and get a script, or have one fixed, explained or reviewed; attach
+  papers (PDF), data or figures and build the script from them. A built-in MCP server lets Claude Desktop / Claude
   Code run simulations themselves.
 
 A tutorial book (PDF) covers everything from installation to advanced use: `../docs/book/mumax-studio-book.pdf`.
@@ -132,10 +134,10 @@ The left rail switches the side panel; the viewer, plot and console stay visible
 | **Setup** | Material presets (Permalloy, CoFeB, Co/Pt with DMI, YIG, ...), per-region values, initial state, solver, temperature and table columns. |
 | **Geometry** | Mesh, then a stack of shapes (see below). The viewer shows the engine's own rasterisation of the result. |
 | **Drive** | `B_ext`, `J` (spin-transfer) and `JSOT` (spin-orbit) as sums of terms, plus an optional custom Python field. |
-| **Script** | The generated script. It follows the forms until you edit it by hand. Includes syntax colouring, error-line marking, open/save, and examples, including the 15 from mumax.github.io. Ctrl+Enter runs. |
+| **Script** | The generated script. It follows the forms until you edit it by hand. Includes syntax colouring, error-line marking, open/save, and examples, including the 15 from mumax.github.io. |
 | **Files** | Outputs per run (`<name>.out/`): view `.ovf`, plot `table.txt`, download. Upload STL / PNG / CSV files for shapes and waveforms. |
 | Viewer | Any quantity (m, B_eff, B_demag, torques, SOTorque, MFM, ...) as the mumax3 colour wheel or one component, with arrows, layer slider and hover readout. |
-| Plot, Console | The plot shows table columns chosen from two drop-down menus (*plot* … *against* …), with a legend, hover readout and CSV export. The console shows the run log; commands typed there run between solver steps. |
+| Plot, Console | The plot shows table columns chosen from two drop-down menus (*plot* … *against* …), with a legend, hover readout and CSV export. The console shows the run log; mumax commands typed there run between solver steps. `/run`, `/pause`, `/resume`, `/stop` control the run; `pwd`, `cd <folder>`, `mkdir <folder>` and `ls` show or change the output folder; `/help` lists them. |
 
 ### Geometry builder
 
@@ -294,10 +296,25 @@ print(magnet.magnetization.average())
 ```
 
 Such scripts run as plain Python (no mumax3 names injected). In the GUI, `plt.show()` saves `figure_NNN.png` into the
-output folder, and the viewers follow the mumax+ world. Verified unchanged against the mumax+ repository examples:
-standard problem 4, anisotropy, LL torque, MRAM bit switching, skyrmion racetrack, Voronoi grains,
-antiferromagnetic resonance, periodic BC, multilayer. Not available: NcAfm, altermagnets, elastodynamics, the
-Poisson solver, moving windows, inter-sublattice DMI.
+output folder, and the viewers follow the mumax+ world.
+
+mumax Studio contains the Python package of [mumax+](https://github.com/mumax/plus) 1.2.2 (GPL-3.0, in
+`mumaxstudio/mumaxplus`, unchanged apart from its imports) and replaces its compiled C++/CUDA core by a NumPy/CuPy port
+(`mumaxstudio/plus_engine`): the same kernels for exchange (with inter-region values and DMI boundary conditions),
+homogeneous and inhomogeneous antiferromagnetic exchange, altermagnetic exchange, interfacial/bulk/inter-sublattice
+DMI, anisotropy, Zeeman and stray fields between magnets (Newell kernel near, cell-averaged dipole far, PBC images),
+spin-transfer torques, thermal noise, magnetoelastic fields and forces, elastodynamics, the Poisson system, the
+Runge-Kutta solvers, the minimizer, the relaxer and the moving window. All types are supported: `Ferromagnet`,
+`Antiferromagnet`, `Altermagnet`, `NcAfm` (and `Ferrimagnet` from `mumaxstudio.plus`). `import mumaxplus` uses a
+separately installed official mumax+ instead if there is one (`MUMAXSTUDIO_PLUS=builtin` forces the built-in one).
+The precision follows `MUMAXPLUS_FP_PRECISION` / `--mumaxplus-fp-precision` outside the app and the device menu
+inside it.
+
+Checked against the mumax+ test suite (`test/` of the repository): it passes except for two float32 rounding checks
+(an exchange field 3.2e-7 instead of 3e-7 from the double-precision reference, and a Zeeman energy ratio required to
+1e-12 that the neighbouring magnet's stray field changes at 1e-7) and `test_ovf.py`, which needs the external
+`pyovf` package (without it `save_ovf`/`load_ovf` use mumax Studio's own OVF reader and writer). The repository
+examples are in the examples menu under *From the mumax+ repository*.
 
 ### Claude
 
@@ -305,6 +322,17 @@ Poisson solver, moving windows, inter-sublattice DMI.
   (`irm https://claude.ai/install.ps1 | iex` on Windows, `curl -fsSL https://claude.ai/install.sh | bash` elsewhere),
   then press *Sign in with Claude* and sign in with your Pro or Max account; the panel unlocks by itself. *Usage*
   shows how much of the plan's limits is used.
+* **Conversation:** *Chat* answers questions (physics, numerics, the app, your results) and writes scripts;
+  *Fix*, *Explain* and *Review* work on the script in the editor. Earlier turns go with every request. Tick
+  *script* to send the editor's script and *results* to send the current run (state, table, output files, log).
+  Enter sends, Shift+Enter starts a new line. Claude never starts a run: *Put in editor* puts its script in the
+  editor, and you run it with *Run* or `/run`.
+* **Papers and files:** the paper-clip button (or dropping files on the panel) attaches PDFs, text/data files
+  (.txt .md .tex .bib .mx3 .py .csv .dat .json) and images to the conversation, up to 25 MB each. Claude reads them
+  with every request in that conversation, so it can take geometry, parameters and protocol from a paper and say
+  where each value comes from. Through Claude Code it gets only a *Read* tool confined to the attachments folder
+  (`~/.mumaxstudio/attachments/<conversation>`); attachments are deleted with the conversation (⟲) or after a week
+  unused.
 * **API key:** paste it in the panel (stored in `~/.mumaxstudio/config.json`, user-only) or set `ANTHROPIC_API_KEY`;
   pip installs also need `pip install anthropic`.
 * **Let Claude run simulations:** *Connect Claude Desktop* / *Connect Claude Code* in the panel, or
