@@ -42,7 +42,7 @@ everything else, so there is nothing more to install:
 | Windows, no install | `mumax-studio-windows-portable.zip` | unzip, start `mumax-studio.exe` |
 | Linux x86-64 | `mumax-studio-linux.tar.gz` | unpack, run `./install-linux.sh` (menu entry + `mumax-studio` command) |
 | macOS, Apple silicon | `mumax-studio-macos-arm64.zip` | unzip, right-click `mumax-studio.app` → Open |
-| NVIDIA GPU | the `-nvidia` builds | include CuPy and the CUDA runtime; need only an NVIDIA driver (525+) |
+| NVIDIA GPU | the same files | the Windows installer asks *CPU or NVIDIA GPU* and downloads the CUDA libraries (~0.5 GB) for the GPU; `install-linux.sh` offers the same; `mumax-studio gpu-setup --default` adds it later. Needs only an NVIDIA driver (525+) |
 
 The app opens in its own window. Your scripts and results go to `~/mumax-studio`.
 
@@ -50,7 +50,7 @@ If Windows says "Windows protected your PC": the installer is not code-signed ye
 or first compare `Get-FileHash <file>` with `SHA256SUMS.txt` on the release page. Or skip installers entirely:
 
 ```bash
-pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"
+pip install "mumax-studio @ https://github.com/jasem109/mumax_studio/releases/latest/download/mumax-studio-python.tar.gz"
 ```
 
 ### Updates

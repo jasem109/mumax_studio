@@ -7,6 +7,7 @@
     mumax-studio convert f.ovf [--png|--csv|--npy]
     mumax-studio mcp                     MCP server on stdin/stdout, so Claude can run simulations
     mumax-studio bench                   time per step against mesh size on every CPU / GPU engine
+    mumax-studio gpu-setup               download NVIDIA GPU support for the installed app (Windows, Linux)
 """
 from __future__ import annotations
 
@@ -25,7 +26,13 @@ def _cmd_info(args):
     print("CPU backend :", cpu.device_name)
     cp, info = _cupy_status()
     print("GPU backend :", info if cp is None else f"available: {info}")
-    if cp is None:
+    from . import gpupack
+
+    if cp is None and gpupack.installed():
+        print("              GPU support is installed; a recent NVIDIA driver (525 or newer) is needed")
+    elif cp is None and getattr(sys, "frozen", False):
+        print("              NVIDIA GPU: run  mumax-studio gpu-setup  to download GPU support")
+    elif cp is None:
         print("              install CuPy for GPU support, e.g.  pip install \"cupy-cuda12x[ctk]\"  (NVIDIA)")
         print("              or  pip install cupy-rocm-5-0  (AMD ROCm, Linux)")
 
@@ -107,6 +114,34 @@ def _cmd_bench(args):
     print(f"wrote {args.out}.csv and {args.out}.png")
 
 
+def _cmd_gpu_setup(args):
+    from . import gpupack
+
+    if args.use:
+        gpupack.set_default_device("gpu:0" if args.use == "gpu" else "cpu")
+        return 0
+    if args.remove:
+        gpupack.remove()
+        gpupack.set_default_device("cpu")
+        return 0
+    if args.status:
+        print(f"NVIDIA driver found: {gpupack.nvidia_present()}")
+        print(f"GPU support installed: {gpupack.installed()}  ({gpupack.pack_dir()})")
+        print(f"download size: {gpupack.download_size() / 1e6:.0f} MB")
+        return 0
+    try:
+        gpupack.install(from_dir=args.from_dir)
+    except Exception as e:
+        print(f"GPU support could not be installed: {e}", file=sys.stderr)
+        if args.default:
+            gpupack.set_default_device("cpu")
+        return 1
+    if args.default:
+        gpupack.set_default_device("gpu:0")
+        print("simulations will run on the GPU by default (change it in the Device menu)")
+    return 0
+
+
 def _cmd_mcp(args):
     if args.workspace:
         os.environ["MUMAXSTUDIO_WORKSPACE"] = os.path.abspath(args.workspace)
@@ -162,6 +197,14 @@ def main(argv=None):
     b.add_argument("--steps", type=int, default=30)
     b.add_argument("--out", default="bench", help="output name without extension")
     b.set_defaults(fn=_cmd_bench)
+
+    gs = sub.add_parser("gpu-setup", help="download NVIDIA GPU support (CuPy + CUDA libraries, ~0.5 GB)")
+    gs.add_argument("--from", dest="from_dir", default=None, help="folder holding the already downloaded wheels")
+    gs.add_argument("--default", action="store_true", help="also make the GPU the default device")
+    gs.add_argument("--use", choices=["cpu", "gpu"], default=None, help="only set the default device")
+    gs.add_argument("--remove", action="store_true", help="remove GPU support again")
+    gs.add_argument("--status", action="store_true", help="show whether GPU support is installed")
+    gs.set_defaults(fn=_cmd_gpu_setup)
 
     m = sub.add_parser("mcp", help="Model Context Protocol server for Claude (stdin/stdout)")
     m.add_argument("--workspace", default=None, help="folder for scripts and outputs")

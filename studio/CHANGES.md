@@ -2,6 +2,22 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.3
+
+- **One download for every computer.** The separate NVIDIA editions (over 1 GB) are gone. The Windows installer
+  now asks where to install and whether simulations run on the **CPU** or an **NVIDIA GPU**. For the GPU it
+  downloads only the CUDA libraries the engine uses (CuPy, CUDA runtime, NVRTC, cuFFT, cuRAND, nvJitLink; about
+  0.5 GB), checks each against its SHA-256 and keeps them in `~/.mumaxstudio/gpu`, so app updates do not download
+  them again. The GPU choice is greyed out when no NVIDIA driver is found. On Linux `install-linux.sh` asks the same
+  question. Run the installer again, or `mumax-studio gpu-setup --default`, to add GPU support later;
+  `gpu-setup --status` shows what is installed and `gpu-setup --remove` deletes it.
+- **Updating from an NVIDIA edition** keeps the GPU: the in-app update installs the normal build and downloads the
+  GPU support once.
+- The device menu explains how to add GPU support when it is missing.
+- **pip installs from the release.** Every release now carries `mumax-studio-python.tar.gz`, and the command is
+  `pip install "mumax-studio @ https://github.com/jasem109/mumax_studio/releases/latest/download/mumax-studio-python.tar.gz"`
+  (the update card of pip installs shows it too). The former `git+https://...` command keeps working.
+
 ## 0.5.2
 
 - **Figures of mumax+ scripts in the app.** What a Python script draws with matplotlib now appears in the Table

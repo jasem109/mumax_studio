@@ -185,18 +185,19 @@ contains Python and every library the program needs.
 \toprule
 System & File & Notes \\
 \midrule
-Windows 10 or 11 & \code{mumax-studio-windows-setup.exe} & installer, no administrator rights needed \\
-Windows, NVIDIA GPU & \code{mumax-studio-windows-nvidia-setup.exe} & includes CuPy and the CUDA runtime \\
+Windows 10 or 11 & \code{mumax-studio-windows-setup.exe} & installer, no administrator rights needed; asks for CPU or NVIDIA GPU \\
 Windows, no installation & \code{mumax-studio-windows-portable.zip} & unzip and start \code{mumax-studio.exe} \\
-Linux, x86-64 & \code{mumax-studio-linux.tar.gz} & also \code{-nvidia} \\
+Linux, x86-64 & \code{mumax-studio-linux.tar.gz} & \code{install-linux.sh} offers the GPU \\
 macOS, Apple silicon & \code{mumax-studio-macos-arm64.zip} & CPU only \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The NVIDIA editions are larger (about one gigabyte) because they carry the CUDA libraries. They need only a
-recent NVIDIA driver (version 525 or newer); the CUDA toolkit does not have to be installed. They also run on
-the processor, so a machine without a suitable GPU loses nothing but disk space.
+There is one download per system. The Windows installer asks whether simulations should run on the processor or
+on an NVIDIA GPU; for the GPU it downloads the CUDA libraries (about half a gigabyte) and keeps them in
+\code{\textasciitilde/.mumaxstudio/gpu}, where they survive updates. On Linux \code{install-linux.sh} asks the
+same question, and on either system \code{mumax-studio gpu-setup -{}-default} adds GPU support at any later
+time. Only a recent NVIDIA driver (version 525 or newer) is needed; the CUDA toolkit does not have to be installed.
 
 \section{Windows}
 
@@ -239,7 +240,7 @@ normally.
 
 On any system with Python 3.9 or newer the program can be installed as an ordinary Python package:
 \begin{shell}
-$ pip install "mumax-studio @ git+https://github.com/jasem109/mumax_studio#subdirectory=studio"
+$ pip install "mumax-studio @ https://github.com/jasem109/mumax_studio/releases/latest/download/mumax-studio-python.tar.gz"
 $ mumax-studio
 \end{shell}
 For the desktop window add \code{pip install pywebview}; for the Claude assistant with an API key add
@@ -292,7 +293,7 @@ by hand. A file whose checksum does not match is discarded and nothing is instal
 
 The Windows installer edition runs the new installer silently into the same folder. The portable, Linux and macOS
 editions replace their program folder. Installations made with pip or from a source checkout cannot replace
-themselves; for them the card shows the command \code{pip install -U "mumax-studio @ git+https://github.com/jasem109/mumax\_studio\#subdirectory=studio"}.
+themselves; for them the card shows the command \code{pip install -U "mumax-studio @ https://github.com/jasem109/mumax\_studio/releases/latest/download/mumax-studio-python.tar.gz"}.
 
 % =====================================================================
 \chapter{A first simulation}\label{ch:first}

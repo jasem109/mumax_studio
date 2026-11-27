@@ -891,7 +891,7 @@ function fillDevices(inf) {
     if (d.id === "cpu") add("cpu", "CPU", false, d.name);
     else add(d.id, `GPU ${d.id.slice(4)}: ${d.name}` + (d.ok ? "" : " (unusable)"), !d.ok, d.ok ? d.name : d.note);
   }
-  if (!devices.some((d) => d.id.startsWith("gpu:"))) add("gpu:none", "GPU: none found (install CuPy)", true, inf.gpu && inf.gpu.info);
+  if (!devices.some((d) => d.id.startsWith("gpu:"))) add("gpu:none", "GPU: none found (hover for why)", true, inf.gpu && inf.gpu.info);
   const want = settings.device || inf.default_backend || "auto";
   sel.value = [...sel.options].some((o) => o.value === want && !o.disabled) ? want : "auto";
   if (settings.precision) $("#selPrecision").value = settings.precision;

@@ -3,7 +3,7 @@ so users install nothing else.
 
     pip install -r requirements.txt pyinstaller pywebview
     python build_exe.py              # -> dist/mumax-studio/   (folder app; .app bundle on macOS)
-    python build_exe.py --gpu        # also bundle CuPy + CUDA runtime (NVIDIA edition, large)
+    python build_exe.py --gpu        # also bundle CuPy + CUDA runtime (large; the releases download it instead)
 
 Build on each target OS (PyInstaller does not cross-compile). The GitHub workflow in
 .github/workflows/release.yml does this for Windows, Linux and macOS and attaches the results to a release.
@@ -71,6 +71,16 @@ args = [
     "--hidden-import", "scipy.signal", "--hidden-import", "mpl_toolkits.axes_grid1",
     "--exclude-module", "tkinter",
 ]
+# the optional GPU support (mumaxstudio/gpupack.py) is downloaded later, next to the app: CuPy then needs these
+# standard-library modules, which nothing in the app itself imports
+for mod in ("glob", "graphlib", "ctypes.util", "importlib.metadata", "importlib.resources", "dataclasses",
+            "pickle", "platform", "hashlib", "tempfile", "difflib", "fnmatch", "contextvars", "queue"):
+    args += ["--hidden-import", mod]
+if sys.platform != "darwin" and not gpu:
+    # list of GPU wheels for this Python and platform, read by gpupack.py and the installers
+    wl = os.path.join(here, "build", "gpu-wheels.txt")
+    subprocess.check_call([sys.executable, os.path.join(here, "packaging", "gpu_wheels.py"), wl])
+    args += ["--add-data", f"{wl}{sep}mumaxstudio"]
 if os.name == "nt":
     args += ["--version-file", _write_version_file()]
 if os.path.isfile(icon):

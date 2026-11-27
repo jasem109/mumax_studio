@@ -33,7 +33,9 @@ from . import __version__
 REPO = "jasem109/mumax_studio"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
-PIP_COMMAND = f'pip install -U "mumax-studio @ git+https://github.com/{REPO}#subdirectory=studio"'
+# the Python package attached to every release (release.yml); downloading it from there counts as a download
+PIP_URL = f"https://github.com/{REPO}/releases/latest/download/mumax-studio-python.tar.gz"
+PIP_COMMAND = f'pip install -U "mumax-studio @ {PIP_URL}"'
 ALLOWED_HOSTS = ("github.com", "api.github.com", "objects.githubusercontent.com",
                  "release-assets.githubusercontent.com", "github-releases.githubusercontent.com")
 CACHE_SECONDS = 6 * 3600
@@ -72,13 +74,9 @@ def install_kind():
 
 
 def edition():
-    """'-nvidia' when this build bundles CuPy (the NVIDIA edition), else ''."""
-    import importlib.util
-
-    try:
-        return "-nvidia" if getattr(sys, "frozen", False) and importlib.util.find_spec("cupy") else ""
-    except Exception:
-        return ""
+    """Since 0.5.3 there is one build per system (GPU support is downloaded separately, see gpupack.py), so the
+    former NVIDIA editions update to the normal build too."""
+    return ""
 
 
 def asset_name(kind, ed=""):

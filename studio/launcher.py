@@ -70,7 +70,7 @@ def main():
         _import_numpy_patiently()
     from mumaxstudio.__main__ import main as cli
 
-    commands = {"gui", "run", "info", "convert", "mcp", "bench", "-h", "--help"}
+    commands = {"gui", "run", "info", "convert", "mcp", "bench", "gpu-setup", "-h", "--help"}
     if not argv:
         argv = ["gui", "--native"]
     elif argv[0] not in commands and os.path.isfile(argv[0]) and argv[0].lower().endswith((".mx3", ".py")) \

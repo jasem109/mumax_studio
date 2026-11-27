@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 
 import numpy as np
 
@@ -74,11 +75,18 @@ def list_gpus():
         return _STATUS_CACHE["gpus"]
     out = []
     try:
+        from . import gpupack
+        gpupack.activate()   # GPU support downloaded by the installer / `mumax-studio gpu-setup`
+    except Exception:
+        pass
+    try:
         import cupy
         n = cupy.cuda.runtime.getDeviceCount()
     except Exception as e:
         _STATUS_CACHE["gpus"], _STATUS_CACHE["why"] = [], (
-            f"CuPy not installed ({type(e).__name__})" if isinstance(e, ImportError) else f"no usable GPU: {e}")
+            ("GPU support not installed: run the installer again and pick NVIDIA GPU, or run "
+             "'mumax-studio gpu-setup'" if getattr(sys, "frozen", False) else f"CuPy not installed ({type(e).__name__})")
+            if isinstance(e, ImportError) else f"no usable GPU: {e}")
         return []
     for i in range(n):
         try:
