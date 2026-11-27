@@ -162,6 +162,12 @@ def tool_run_simulation(args):
     t0 = time.time()
 
     def work():
+        old_cwd = os.getcwd()
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            os.chdir(out_dir)   # relative file names in the script land in the run's output folder
+        except OSError:
+            pass
         try:
             run_source(sim, src, filename=name + "." + lang, lang=lang, out=log.append)
             res["state"] = "finished"
@@ -171,6 +177,11 @@ def tool_run_simulation(args):
             res["state"], res["error"] = "error", str(e)
         except Exception as e:  # noqa
             res["state"], res["error"] = "error", f"{type(e).__name__}: {e}\n" + traceback.format_exc()[-1500:]
+        finally:
+            try:
+                os.chdir(old_cwd)
+            except OSError:
+                pass
 
     th = threading.Thread(target=work, daemon=True)
     th.start()

@@ -984,7 +984,15 @@ class Simulation(CaseInsensitive):
         if self.time + self.dt > self.alarm and not self.FixDt:
             # never step past the end of Run(): shorten this step (the step size adapts back afterwards)
             self.__dict__["dt"] = max(self.alarm - self.time, 1e-20)
-        ok = self.stepper.step(self)
+        # the solver moves `time` through its intermediate stages (and back on a rejected step): the status
+        # readout shows the last completed step meanwhile
+        d = self.__dict__
+        d["_shown"] = (self.time, self.dt)
+        d["_stepping"] = True
+        try:
+            ok = self.stepper.step(self)
+        finally:
+            d["_stepping"] = False
         if ok:
             for f in self.post_step:
                 f()
@@ -1204,8 +1212,10 @@ class Simulation(CaseInsensitive):
     # ================================================================== status for GUI
     def status(self):
         mesh = self.mesh
+        d = self.__dict__
+        t, dt = d["_shown"] if d.get("_stepping") and "_shown" in d else (self.time, self.dt)
         return {
-            "t": self.time, "dt": self.dt, "step": self.NSteps, "undone": self.NUndone, "nevals": self.NEvals,
+            "t": t, "dt": dt, "step": self.NSteps, "undone": self.NUndone, "nevals": self.NEvals,
             "maxTorque": self.LastTorque, "lastErr": self.LastErr,
             "mesh": None if mesh is None else {"n": mesh.n, "cell": mesh.cell, "pbc": mesh.pbc},
             "solver": self.solver_type, "backend": self.be.name, "device": self.be.device_name,

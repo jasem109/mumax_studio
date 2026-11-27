@@ -2,6 +2,14 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.4
+
+- **Fixed: scripts that save files failed** with `OSError: ... requested and 0 written` (for example the
+  altermagnet dispersion example's `np.save`). Relative file names in a script now go to the run's output folder
+  instead of the app's install folder.
+- **Fixed: the time readout `t` jumped back and forth** during a run. It showed the solver's intermediate
+  Runge-Kutta stage times and rejected steps; it now shows the time of the last completed step.
+
 ## 0.5.3
 
 - **One download for every computer.** The separate NVIDIA editions (over 1 GB) are gone. The Windows installer
@@ -17,7 +25,6 @@ The section for a version is used as the text of its GitHub release, which the a
 - **pip installs from the release.** Every release now carries `mumax-studio-python.tar.gz`, and the command is
   `pip install "mumax-studio @ https://github.com/jasem109/mumax_studio/releases/latest/download/mumax-studio-python.tar.gz"`
   (the update card of pip installs shows it too). The former `git+https://...` command keeps working.
-
 ## 0.5.2
 
 - **Figures of mumax+ scripts in the app.** What a Python script draws with matplotlib now appears in the Table

@@ -859,8 +859,9 @@ class StudioView:
         w = self.world
         ts = w.timesolver
         mesh = self.mesh
+        t, dt = ts.shown()
         return {
-            "t": ts.time, "dt": ts.timestep, "step": ts.nsteps, "undone": ts.nundone, "nevals": ts.nevals,
+            "t": t, "dt": dt, "step": ts.nsteps, "undone": ts.nundone, "nevals": ts.nevals,
             "maxTorque": w.last_torque, "lastErr": ts.last_error,
             "mesh": None if mesh is None else {"n": mesh.n, "cell": mesh.cell, "pbc": mesh.pbc},
             "solver": "mumax+ " + ts.method, "backend": w.be.name, "device": w.be.device_name,

@@ -810,6 +810,12 @@ class TimeSolver:
     def time(self):
         return self._time
 
+    def shown(self):
+        """(time, timestep) of the last completed step: safe to read from another thread during a step."""
+        if getattr(self, "_stepping", False):
+            return self._shown
+        return self._time, self._timestep
+
     @time.setter
     def time(self, t):
         self._time = float(t)
@@ -970,7 +976,14 @@ class TimeSolver:
             raise RuntimeError("Timesolver can not make a step because the timestep is smaller than or equal "
                                "to zero.")
         self.world._before_step()
-        self._rk_step()
+        # _rk_step moves _time through the Runge-Kutta stages (and back on a rejected step): readers on
+        # other threads (the status readout) get the last completed step meanwhile, see shown_time
+        self._shown = (self._time, self._timestep)
+        self._stepping = True
+        try:
+            self._rk_step()
+        finally:
+            self._stepping = False
         self.nsteps += 1
         self._do_post_step()
 

@@ -153,6 +153,14 @@ class Job:
                 if fname != "<console>":
                     self.figures = []
                 _prepare_matplotlib(self.out_dir, self.append_log, self.add_figure)
+            # relative file names in the script (np.save("data.npy"), open("log.txt", "w"), ...) land in the run's
+            # output folder, not in the app's install folder (read-only under Program Files, or a full C: drive)
+            old_cwd = os.getcwd()
+            try:
+                os.makedirs(self.out_dir, exist_ok=True)
+                os.chdir(self.out_dir)
+            except OSError:
+                pass
             try:
                 self.ns = run_source(self.sim, src, filename=fname, lang=lang, namespace=self.ns,
                                      out=self.append_log)
@@ -174,6 +182,10 @@ class Job:
                 self.append_log("ERROR: " + self.error)
                 self.append_log(traceback.format_exc()[-3000:])
             finally:
+                try:
+                    os.chdir(old_cwd)
+                except OSError:
+                    pass
                 if lang == "py":
                     try:
                         from . import figures
