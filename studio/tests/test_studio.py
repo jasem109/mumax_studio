@@ -98,6 +98,32 @@ class TestGuiJobs(Isolated):
         self.assertTrue(any("avg" in line for _, line in s["log"]))
         self.assertIn("figure_001.png", os.listdir(os.path.join(self.tmp, "ws", "plus.out")))
         self.assertEqual(s["status"]["mesh"]["n"], (16, 8, 1))     # the GUI follows the mumax+ world
+        self.assertEqual([f["path"] for f in s["figures"]], ["plus.out/figure_001.png"])   # shown in the app
+
+    def test_figures_of_python_scripts_are_listed(self):
+        """plt.pause loops, relative savefig, figures left open and animations all reach the Figures view."""
+        from mumaxstudio.server import Studio
+
+        st = Studio(os.path.join(self.tmp, "ws"))
+        src = ("import matplotlib.pyplot as plt\n"
+               "from matplotlib.animation import FuncAnimation\n"
+               "fig, ax = plt.subplots(); line, = ax.plot([], [])\n"
+               "for i in range(3):\n"
+               "    line.set_data(range(i + 2), range(i + 2)); ax.relim(); ax.autoscale_view(); plt.pause(0.5)\n"
+               "plt.show()\n"                                     # the live figure gets its final state
+               "f2 = plt.figure(); plt.plot([1, 2]); f2.savefig('mine.png')\n"
+               "plt.close(f2)\n"
+               "f3, a3 = plt.subplots(); ln, = a3.plot([0, 1], [0, 0])\n"
+               "anim = FuncAnimation(f3, lambda k: ln.set_ydata([0, k]), frames=3, interval=100)\n"
+               "plt.show()\n"
+               "plt.figure(); plt.plot([3, 1])\n")                 # never shown: saved at the end
+        s = self._run(st, {"name": "figs", "script": src, "lang": "py", "device": "cpu"})
+        self.assertEqual(s["state"], "finished", s["log"][-8:])
+        paths = [f["path"] for f in s["figures"]]
+        self.assertEqual(paths, ["figs.out/figure_001.png", "figs.out/mine.png", "figs.out/figure_002.gif",
+                                 "figs.out/figure_003.png"], s["log"][-8:])
+        for p in paths:
+            self.assertTrue(os.path.getsize(os.path.join(self.tmp, "ws", p)) > 0, p)
 
     def test_field3d_binary(self):
         from mumaxstudio.server import Studio

@@ -33,34 +33,11 @@ from . import plus
 plus.install_alias()
 
 
-def _prepare_matplotlib(out_dir, log):
-    """Scripts run on a worker thread without a window: draw with Agg and turn plt.show() into PNG files in the
-    output directory, which the Files panel lists."""
-    try:
-        import matplotlib
-        matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
-    except Exception:  # matplotlib not installed: scripts that need it fail with a clear ImportError
-        return
-    if getattr(plt.show, "_studio", False):
-        plt.show.__dict__["out_dir"] = out_dir
-        plt.show.__dict__["log"] = log
-        plt.show.__dict__["count"] = 0     # each run numbers its figures from figure_001
-        return
+def _prepare_matplotlib(out_dir, log, on_figure=None):
+    """Python scripts: matplotlib figures go to the output folder and are shown in the app (see figures.py)."""
+    from . import figures
+    return figures.prepare(out_dir, log, on_figure)
 
-    def show(*args, **kwargs):
-        d = show.out_dir
-        os.makedirs(d, exist_ok=True)
-        for num in plt.get_fignums():
-            fig = plt.figure(num)
-            show.count += 1
-            path = os.path.join(d, f"figure_{show.count:03d}.png")
-            fig.savefig(path, dpi=130, bbox_inches="tight")
-            show.log(f"// figure saved: {os.path.basename(path)}")
-        plt.close("all")
-
-    show._studio, show.out_dir, show.log, show.count = True, out_dir, log, 0
-    plt.show = show
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
@@ -76,7 +53,7 @@ def list_examples():
         if os.path.isdir(sub):
             out += [group + "/" + f for f in sorted(os.listdir(sub)) if f.endswith((".mx3", ".py"))]
     return out
-OUTPUT_EXT = (".ovf", ".png", ".txt", ".npy", ".csv")
+OUTPUT_EXT = (".ovf", ".png", ".gif", ".txt", ".npy", ".csv")
 
 
 class Job:
@@ -105,6 +82,8 @@ class Job:
         self.thread = None
         self.evals_hist = []  # (wall time, NEvals) for speed estimate
         self.worlds = []      # mumax+ style World objects created by the script
+        self.figures = []     # matplotlib figures of the script: {path (relative to the workspace), v}
+        self.workspace = server.workspace
 
     @property
     def view(self):
@@ -135,6 +114,22 @@ class Job:
                     except OSError:
                         pass
 
+    def add_figure(self, path):
+        try:
+            rel = os.path.relpath(path, self.workspace)
+        except ValueError:   # another drive: the app cannot serve it
+            return
+        if rel.startswith(".."):
+            return
+        rel = rel.replace("\\", "/")
+        with self.lock:
+            v = time.time()
+            for f in self.figures:
+                if f["path"] == rel:
+                    f["v"] = v
+                    return
+            self.figures.append({"path": rel, "v": v})
+
     def append_log(self, text):
         with self.lock:
             for line in str(text).splitlines() or [""]:
@@ -155,7 +150,9 @@ class Job:
             self.state = "running"
             plus._WORLD_HOOK = self._world_hook
             if lang == "py":
-                _prepare_matplotlib(self.out_dir, self.append_log)
+                if fname != "<console>":
+                    self.figures = []
+                _prepare_matplotlib(self.out_dir, self.append_log, self.add_figure)
             try:
                 self.ns = run_source(self.sim, src, filename=fname, lang=lang, namespace=self.ns,
                                      out=self.append_log)
@@ -177,6 +174,12 @@ class Job:
                 self.append_log("ERROR: " + self.error)
                 self.append_log(traceback.format_exc()[-3000:])
             finally:
+                if lang == "py":
+                    try:
+                        from . import figures
+                        figures.finish()   # figures the script drew but never showed or saved
+                    except Exception:
+                        pass
                 # close table.txt so the output can be deleted or moved (Windows keeps open files locked);
                 # a later Run from the console reopens it for appending
                 self.sim.close()
@@ -678,7 +681,7 @@ class Studio:
             "state": "paused" if paused else j.state, "name": j.name, "status": st, "log": log,
             "error": j.error, "error_line": j.error_line,
             "table": {"header": hdr, "rows": rows, "from": rows_from},
-            "speed": j.speed(), "wall": time.time() - j.started,
+            "speed": j.speed(), "wall": time.time() - j.started, "figures": list(j.figures),
             "quantities": [k for k, v in sim.quantities.items() if v.is_field] +
                           [k for k in sim.params.keys()],
         }

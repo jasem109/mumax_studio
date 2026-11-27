@@ -102,14 +102,14 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
 
 // ------------------------------------------------------------------ pages
 let page = "setup";
-$$(".railbtn").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+$$(".railbtn[data-tab]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 $$("[data-goto]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchTab(a.dataset.goto); }));
 const PAGE_TITLES = { setup: "Setup", geometry: "Geometry", drive: "Drive", script: "Script", files: "Files", help: "Help" };
 function switchTab(name) {
   page = name;
   $("#sideTitle").textContent = PAGE_TITLES[name] || name;
   if (typeof LAYOUT !== "undefined" && LAYOUT.isOpen && !LAYOUT.isOpen("side")) LAYOUT.open("side");
-  $$(".railbtn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $$(".railbtn[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + name));
   if (name === "files") loadFiles();
   if (name === "script") syncEditor();
@@ -777,6 +777,7 @@ function handleStatus(s) {
       if (plotSource === "live") drawPlot();
     }
   }
+  if (s.figures) showFigures(s.figures, s.name);
   if (s.state === "error" && s.error) {
     lastError = s.error;
     $("#errorBar").textContent = s.error;
@@ -789,6 +790,79 @@ function handleStatus(s) {
     if ((s.state === "running" && now - last3d > live3dEvery) || prev !== s.state || !VIEW3D.hasField) { last3d = now; load3dLive(); }
   }
 }
+// ------------------------------------------------------------------ figures of Python scripts
+// plt.show(), plt.pause(), savefig() and plot_field() of a running mumax+ script are listed in the run status;
+// the Table panel switches to them when a new one appears and keeps live ones (plt.pause loops) up to date.
+let figs = [], figRun = null, figShown = null, figUrl = null, figUserTable = false;
+function setPlotMode(fig) {
+  $("#plotModeFig").classList.toggle("on", fig);
+  $("#plotModeTable").classList.toggle("on", !fig);
+  $$("#plotModeTable, #plotModeFig").forEach((b) => b.setAttribute("aria-selected", String(b.classList.contains("on"))));
+  $$(".tblonly").forEach((e) => { e.hidden = fig; });
+  $$(".figonly").forEach((e) => { e.hidden = !fig; });
+  $("#plotWrap").hidden = fig;
+  $("#figWrap").hidden = !fig;
+  if (fig) loadFigure(); else drawPlot();
+}
+const figMode = () => $("#plotModeFig").classList.contains("on");
+$("#plotModeTable").addEventListener("click", () => { figUserTable = true; setPlotMode(false); });
+$("#plotModeFig").addEventListener("click", () => { figUserTable = false; setPlotMode(true); });
+$("#figSel").addEventListener("change", () => { figShown = null; loadFigure(); });
+$("#btnFigOpen").addEventListener("click", async () => {
+  const f = figs.find((x) => x.path === $("#figSel").value);
+  if (!f) return;
+  try { downloadBlob(await api(`/api/file?path=${encodeURIComponent(f.path)}`, { blob: true }), f.path.split("/").pop()); }
+  catch (e) { logLine("// " + e.message); }
+});
+function showFigures(list, run) {
+  if (run !== figRun) { figRun = run; figUserTable = false; figShown = null; if (!list.length && figMode()) setPlotMode(false); }
+  const grew = list.length > figs.length;
+  const sel = $("#figSel");
+  const prev = sel.value;
+  figs = list;
+  $("#figCount").textContent = list.length ? `(${list.length})` : "";
+  const names = list.map((f) => f.path).join("|");
+  if (sel.dataset.list !== names) {
+    sel.dataset.list = names;
+    sel.innerHTML = "";
+    for (const f of list) { const o = document.createElement("option"); o.value = f.path; o.textContent = f.path.split("/").pop(); sel.appendChild(o); }
+    sel.value = grew || !list.some((f) => f.path === prev) ? (list.length ? list[list.length - 1].path : "") : prev;
+  }
+  if (grew && !figUserTable) {
+    if (!figMode()) setPlotMode(true);
+    if (!LAYOUT.isOpen("plot")) LAYOUT.open("plot");
+  }
+  $("#figEmpty").hidden = list.length > 0;
+  if (figMode()) loadFigure();
+}
+let figBusy = false;
+async function loadFigure() {
+  const f = figs.find((x) => x.path === $("#figSel").value);
+  const img = $("#figImg");
+  $("#figEmpty").hidden = figs.length > 0;
+  if (!f) { img.removeAttribute("src"); return; }
+  const key = f.path + "@" + f.v;
+  if (key === figShown || figBusy) return;
+  figBusy = true;
+  try {
+    const b = await api(`/api/file?path=${encodeURIComponent(f.path)}`, { blob: true });
+    if (b.size) {
+      const u = URL.createObjectURL(b);
+      img.src = u;
+      if (figUrl) URL.revokeObjectURL(figUrl);
+      figUrl = u;
+      figShown = key;
+    }
+  } catch (e) { /* being written: next poll */ }
+  figBusy = false;
+}
+
+// ------------------------------------------------------------------ About: citations and contributors
+$("#btnAbout").addEventListener("click", () => { $("#aboutModal").hidden = false; $("#aboutClose").focus(); });
+$("#aboutClose").addEventListener("click", () => { $("#aboutModal").hidden = true; });
+$("#aboutModal").addEventListener("click", (e) => { if (e.target.id === "aboutModal") $("#aboutModal").hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#aboutModal").hidden) $("#aboutModal").hidden = true; });
+
 // Small meshes refresh with every status poll; big ones as often as loading the field allows (≤ 1/3 of the time).
 let last3d = 0, busy3d = false, live3dEvery = 400;
 async function load3dLive() {
@@ -1578,6 +1652,7 @@ async function init() {
   }
   settings = inf.settings || {};
   $("#splashVer").textContent = "version " + inf.version;
+  $("#aboutVer").textContent = "version " + inf.version;
   workspace = inf.workspace || ""; pathSep = inf.sep || pathSep;
   folderChosen = inf.folder_chosen !== false;
   if (settings.geo_view === "3d" || settings.geo_view === "2d") geoView = settings.geo_view;

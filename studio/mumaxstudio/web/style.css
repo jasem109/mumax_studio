@@ -146,6 +146,7 @@ input[type="range"] { padding: 0; border: 0; background: none; }
 .railbtn svg { width: 19px; height: 19px; }
 .railbtn:hover { color: var(--ink); background: var(--panel-2); }
 .railbtn.active { color: var(--ink); border-left-color: var(--accent); background: var(--panel-2); }
+.railbtn.railfoot { margin-top: auto; margin-bottom: 6px; }
 .panel { background: var(--panel); min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .side .page { min-width: 260px; }
 .dock { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; padding: 6px; background: var(--paper); }
@@ -336,6 +337,19 @@ textarea.code { width: 100%; margin-top: 8px; font: 12px/1.5 var(--font-mono); b
 .canvaswrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .canvaswrap.dragging { cursor: grabbing; }
 .canvaswrap.drop { box-shadow: inset 0 0 0 2px var(--data); }
+/* table panel: Table / Figures switch and the figures of Python scripts */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; flex: none; }
+.segbtn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; }
+.segbtn + .segbtn { border-left: 1px solid var(--line-2); }
+.segbtn.on { background: var(--panel-2); color: var(--ink); font-weight: 600; }
+span.tblonly { display: contents; }
+.tblonly[hidden], .figonly[hidden] { display: none !important; }
+.figwrap { flex: 1; min-height: 0; position: relative; background: #fff; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.figwrap[hidden] { display: none; }
+.figwrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.figwrap img:not([src]) { display: none; }
+.figempty { color: #555; max-width: 420px; text-align: center; line-height: 1.5; padding: 16px; }
+#figSel { max-width: 220px; }
 #view3d { cursor: grab; touch-action: none; }
 #view3d:active { cursor: grabbing; }
 .legend { position: absolute; right: 8px; bottom: 8px; background: color-mix(in srgb, var(--panel) 92%, transparent);
@@ -571,6 +585,13 @@ textarea#asInput:disabled { opacity: .6; }
 #anaWinLbl[hidden] { display: none; }
 
 /* ---- save video */
+.modal .card.about { gap: 8px; }
+.about .abouthead { display: flex; align-items: center; gap: 12px; }
+.about .abouthead img { width: 48px; height: 48px; }
+.about .abouthead h3 { font-size: 18px; }
+.about h4 { margin: 8px 0 0; font-size: 12.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+.about .cites { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--ink); line-height: 1.5; font-size: 13px; }
+.about a { color: var(--accent); }
 .modal .card.vidcard { width: min(980px, 96vw); max-height: 94vh; overflow: auto; }
 .vidgrid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; }
 @media (max-width: 860px) { .vidgrid { grid-template-columns: 1fr; } }

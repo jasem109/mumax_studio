@@ -4,6 +4,12 @@ The section for a version is used as the text of its GitHub release, which the a
 
 ## 0.5.2
 
+- **Figures of mumax+ scripts in the app.** What a Python script draws with matplotlib now appears in the Table
+  panel, which switches to *Figures* (the *Table* / *Figures* buttons switch back): `plt.show()`, `plot_field()`,
+  `savefig()` and figures left open at the end of the script. Plots redrawn with `plt.pause()` update live while
+  the simulation runs, and a `FuncAnimation` is saved as an animated GIF. `savefig("name.png")` with a relative
+  path now writes into the run's output folder. *Save* downloads the figure shown.
+- **About.** The new button at the bottom of the left rail shows the papers to cite and the contributors.
 - **Credits on the start screen.** The splash shown while mumax Studio starts now cites the two papers it is
   built on — mumax³ (A. Vansteenkiste *et al.*, *The design and verification of MuMax3*, AIP Advances **4**,
   107133 (2014), doi:10.1063/1.4899186) and mumax⁺ (L. Moreels *et al.*, *mumax+: extensible GPU-accelerated

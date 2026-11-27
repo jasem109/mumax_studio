@@ -39,6 +39,7 @@
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
     <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
   </defs>
 </svg>
@@ -117,6 +118,7 @@
     <button class="railbtn" data-tab="script" title="Script editor"><svg><use href="#i-script"/></svg><span>Script</span></button>
     <button class="railbtn" data-tab="files" title="Workspace files"><svg><use href="#i-files"/></svg><span>Files</span></button>
     <button class="railbtn" data-tab="help" title="Reference"><svg><use href="#i-help"/></svg><span>Help</span></button>
+    <button class="railbtn railfoot" id="btnAbout" type="button" title="About mumax Studio: citations and contributors"><svg><use href="#i-info"/></svg><span>About</span></button>
   </nav>
 
   <div class="dock" id="dock">
@@ -454,7 +456,11 @@ print(magnet.magnetization.average())</pre>
   <!-- ======================= plot ======================= -->
   <section class="panel plot" data-panel="plot" aria-label="Table plot">
     <div class="toolbar">
-      <span class="vtitle">Table</span>
+      <div class="seg" role="tablist" aria-label="Show">
+        <button class="segbtn on" id="plotModeTable" type="button" role="tab" title="Plot the table of the run">Table</button>
+        <button class="segbtn" id="plotModeFig" type="button" role="tab" title="Figures drawn by the script (matplotlib)">Figures <span id="figCount"></span></button>
+      </div>
+      <span class="tblonly">
       <details class="menu right" id="yMenu">
         <summary class="btn small" id="yBtn" title="Which columns to plot (one or more)">plot: <span id="yLabel">–</span> ▾</summary>
         <div class="menubody ymenu">
@@ -465,10 +471,17 @@ print(magnet.magnetization.average())</pre>
       <label class="small">against <select id="selX" title="The x axis"></select></label>
       <label class="small" title="Analysis applied to the plotted columns">show <select id="selAna" aria-label="Analysis"></select></label>
       <label class="small" id="anaWinLbl" title="Number of rows averaged" hidden>over <input type="number" id="anaWin" min="3" max="999" step="2" value="9"> rows</label>
+      </span>
+      <span class="figonly" hidden><select id="figSel" aria-label="Figure"></select></span>
       <span class="spacer"></span>
-      <button class="btn small" id="btnCsv" title="Download what is plotted as CSV (the analysed columns when an analysis is chosen)">CSV</button>
+      <button class="btn small tblonly" id="btnCsv" title="Download what is plotted as CSV (the analysed columns when an analysis is chosen)">CSV</button>
+      <button class="btn small figonly" id="btnFigOpen" title="Save this figure" hidden>Save</button>
     </div>
-    <div class="canvaswrap"><canvas id="plot"></canvas></div>
+    <div class="canvaswrap" id="plotWrap"><canvas id="plot"></canvas></div>
+    <div class="figwrap" id="figWrap" hidden>
+      <img id="figImg" alt="Figure drawn by the script">
+      <div class="figempty small" id="figEmpty">Figures that a Python (mumax+) script draws with matplotlib appear here while it runs: <code>plt.show()</code>, <code>plt.pause()</code>, <code>savefig()</code> and <code>plot_field()</code>.</div>
+    </div>
   </section>
 
   <!-- ======================= console ======================= -->
@@ -564,6 +577,29 @@ print(magnet.magnetization.average())</pre>
   </div>
 </main>
 
+<div class="modal" id="aboutModal" hidden role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+  <div class="card wide about">
+    <div class="abouthead"><img src="icon.svg" alt=""><div><h3 id="aboutTitle">mumax Studio</h3><p id="aboutVer">&nbsp;</p></div></div>
+    <h4>Please cite</h4>
+    <p class="cite">mumax Studio runs simulations written for mumax³ and mumax⁺. When you publish results, cite the papers of these programs:</p>
+    <ol class="cites">
+      <li>A. Vansteenkiste, J. Leliaert, M. Dvornik, M. Helsen, F. Garcia-Sanchez and B. Van Waeyenberge,
+        “The design and verification of MuMax3”, <i>AIP Advances</i> <b>4</b>, 107133 (2014).
+        <a href="https://doi.org/10.1063/1.4899186" target="_blank" rel="noopener">doi:10.1063/1.4899186</a></li>
+      <li>L. Moreels <i>et al.</i>, “mumax⁺: extensible GPU-accelerated micromagnetics and beyond”,
+        arXiv:2411.18194 (2024).
+        <a href="https://arxiv.org/abs/2411.18194" target="_blank" rel="noopener">arxiv.org/abs/2411.18194</a></li>
+    </ol>
+    <h4>Contributors</h4>
+    <ul class="cites">
+      <li><b>Mohammad Abu Jasem</b> — author and developer.
+        <a href="https://majasem.com" target="_blank" rel="noopener">majasem.com</a></li>
+      <li><b>Claude</b> (Anthropic) — AI assistant that helped build this software.</li>
+      <li>The mumax³ and mumax⁺ teams (DyNaMat, Ghent University), whose programs mumax Studio follows.</li>
+    </ul>
+    <div class="acts"><span class="spacer"></span><button class="btn primary" id="aboutClose" type="button">Close</button></div>
+  </div>
+</div>
 <div class="modal" id="tokenModal" hidden>
   <div class="card">
     <h3>Session token needed</h3>
