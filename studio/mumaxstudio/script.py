@@ -220,6 +220,9 @@ class Namespace(dict):
         low = key.lower()
         if low == "t":
             return self.sim.time
+        if low == "dt" and "dt" in self.sim.quantities:
+            from .quantities import NumberQuantity
+            return NumberQuantity(self.sim.dt, self.sim.quantities["dt"])
         if low in self.var_low:
             return getattr(self.sim, VARIABLES[self.var_low[low]])
         if low in self.ro_low:
@@ -251,6 +254,9 @@ class Namespace(dict):
         low = key.lower()
         if low == "t":
             sim.time = float(value)
+            return
+        if low == "dt":   # mumax3: dt is the variable Dt_si (the next time step)
+            sim.__dict__["dt"] = float(value)
             return
         if low in self.var_low:
             attr = VARIABLES[self.var_low[low]]

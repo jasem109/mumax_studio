@@ -134,7 +134,7 @@ print(Cross(m, ConstVector(0, 1, 0)).average())
 print(Madd(m, m, 2, -1).average())
 """)
         self.assertIn("0.5", out[-3])
-        self.assertTrue(out[-2].replace(" ", "").startswith("[0.0,0.0,1.0]") or "1.0" in out[-2])
+        self.assertEqual(out[-2].replace(" ", ""), "(0,0,1)")   # .average() is mumax3's Average(): a tuple
         self.assertTrue(out[-1].replace(" ", "").startswith("[1.0,0.0,0.0]") or out[-1].startswith("(1"))
 
     def test_spatial_masks(self):

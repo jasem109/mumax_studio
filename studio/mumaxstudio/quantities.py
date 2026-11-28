@@ -158,9 +158,21 @@ class ParamQuantity(Quantity):
         return v
 
 
+class NumberQuantity(float):
+    """A script number that also names an output quantity: mumax3's `dt` is a plain float64 in expressions
+    (acc += dt), while TableAdd(dt) / save(dt) still reach the quantity."""
+
+    def __new__(cls, value, quantity):
+        obj = super().__new__(cls, value)
+        obj.quantity = quantity
+        return obj
+
+
 def as_quantity(obj):
     if isinstance(obj, Quantity):
         return obj
+    if isinstance(obj, NumberQuantity):
+        return obj.quantity
     if hasattr(obj, "lut") and hasattr(obj, "sim"):
         return ParamQuantity(obj)
     raise TypeError(f"{obj!r} is not an output quantity")

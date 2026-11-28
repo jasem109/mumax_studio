@@ -2,6 +2,19 @@
 
 The section for a version is used as the text of its GitHub release, which the app's update dialog shows.
 
+## 0.5.5
+
+- **Temperature checked against mumax3.** The thermal field, solvers and outputs were compared with official mumax3
+  3.12 (on a GPU) and with theory: the Langevin test at 100 K and 300 K, mumax3's `rk4temperature` test, a thin film
+  at 100 K and an SOT-driven nanoring at 0 K and 100 K all agree. Note that at finite temperature two runs (also
+  two mumax3 runs with different `ThermSeed`) never give the same curve: compare averages over several seeds.
+- **Fixed: the Euler solver with temperature never finished** when no fixed time step was set (the time step
+  shrank to about 1e-21 s). It now stops with a message asking for `FixDt` or the Heun solver.
+- **Fixed: `dt` in a script was not a number.** `acc += dt` and `dt * 2` failed; `dt` is now the time step as
+  in mumax3, and `TableAdd(dt)` works.
+- **Fixed: `m.comp(2).average()` returned a list** instead of a number when written in lowercase.
+- `print(dt)` and `print(E_therm)` now print the value.
+
 ## 0.5.4
 
 - **Fixed: scripts that save files failed** with `OSError: ... requested and 0 written` (for example the

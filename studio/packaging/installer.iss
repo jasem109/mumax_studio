@@ -1,12 +1,12 @@
 ; Inno Setup script: turns dist\mumax-studio\ (from build_exe.py) into a normal Windows installer
 ; with Start-menu / desktop shortcuts, an uninstaller and an "Open with mumax Studio" entry for .mx3 files.
-;   iscc /DAppVersion=0.5.4 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
+;   iscc /DAppVersion=0.5.5 packaging\installer.iss      -> dist\mumax-studio-windows-setup.exe
 ; The installer asks where to install and whether simulations run on the CPU or an NVIDIA GPU. For the GPU it
 ; downloads the CUDA libraries listed in build\gpu-wheels.txt (written by build_exe.py) and lets the app unpack
 ; them into %USERPROFILE%\.mumaxstudio\gpu (see mumaxstudio\gpupack.py).
 
 #ifndef AppVersion
-  #define AppVersion "0.5.4"
+  #define AppVersion "0.5.5"
 #endif
 ; Python version of the build: the GPU folder is per Python version (gpupack.tag())
 #ifndef PyTag

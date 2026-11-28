@@ -37,6 +37,11 @@ class Euler(Stepper):
         k = sim.torque(m)
         if sim.FixDt:
             sim.dt = sim.FixDt
+        elif not sim.Temp.is_zero() and not sim.relaxing:
+            # the noise grows as 1/sqrt(dt) while the adaptive step shrinks as 1/torque: dt collapses to
+            # ~1e-21 s and the run never ends (mumax3 has the same loop, with this check commented out)
+            raise RuntimeError("Finite temperature with the Euler solver requires a fixed time step: "
+                               "set FixDt (e.g. FixDt = 1e-14), or use SetSolver(2) Heun")
         else:
             tmax = _maxnorm(sim, k)
             sim.dt = (sim.MaxErr / (tmax * sim.GammaLL)) if tmax > 0 else max(sim.dt, 1e-15)

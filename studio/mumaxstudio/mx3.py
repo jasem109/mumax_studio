@@ -146,7 +146,9 @@ class Translator:
             elif kind == "id":
                 low = v.lower()
                 if prev == ".":
-                    out.append(("id", v))
+                    # Go methods are exported (capitalised); the Python objects also have an internal
+                    # lowercase average() returning a list, which a script's m.comp(2).average() must not reach
+                    out.append(("id", "Average" if low == "average" else v))
                 elif v in ("true", "false", "nil"):
                     out.append(("id", {"true": "True", "false": "False", "nil": "None"}[v]))
                 elif self.lookup(low) is not None:

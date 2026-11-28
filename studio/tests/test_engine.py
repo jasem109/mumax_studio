@@ -250,5 +250,74 @@ class TestStandardProblem4(unittest.TestCase):
         self.assertAlmostEqual(mx, 0.9669, delta=2e-3)
 
 
+LANGEVIN_SETUP = """
+SetGridSize(512, 1, 1)
+c := pow(100e-27, 1/3.)
+SetCellSize(c, c, c)
+EnableDemag = false
+Aex = 0
+Msat = 800e3
+alpha = 0.1
+B_ext = vector(0, 0, 0.05)
+m = uniform(0, 0, 1)
+ThermSeed(7)
+"""
+
+
+class TestThermal(unittest.TestCase):
+    """Thermal field as mumax3 engine/temperature.go, checked against the Langevin function (as mumax+ langevin.py)."""
+
+    def test_field_amplitude(self):
+        from mumaxstudio.constants import KB
+        sim = new_sim()
+        run_source(sim, LANGEVIN_SETUP + "Temp = 300\nFixDt = 1e-13\n", lang="mx3", out=lambda s: None)
+        b = host(sim, sim.thermal.field())
+        want = math.sqrt(2 * KB * 0.1 * 300 / (GAMMA0 * 800e3 * sim.mesh.cell_volume * 1e-13))
+        self.assertAlmostEqual(float(b.std()) / want, 1.0, delta=0.06)
+
+    def test_langevin(self):
+        T, kB = 300.0, 1.380649e-23
+        xi = 800e3 * 100e-27 * 0.05 / (kB * T)
+        want = 1 / math.tanh(xi) - 1 / xi   # 0.3035
+        sim = new_sim()
+        out = []
+        run_source(sim, LANGEVIN_SETUP + """
+        Temp = 300
+        Run(5e-9)
+        s := 0.0
+        for i:=0; i<100; i++ {
+            Run(2e-11)
+            s += m.comp(2).average()
+        }
+        print(s / 100)
+        """, lang="mx3", out=out.append)
+        self.assertAlmostEqual(float(out[-1]), want, delta=0.03)
+
+    def test_euler_adaptive_refused(self):
+        sim = new_sim()
+        with self.assertRaises(Exception) as cm:
+            run_source(sim, LANGEVIN_SETUP + "Temp = 300\nSetSolver(1)\nRun(1e-12)\n", lang="mx3",
+                       out=lambda s: None)
+        self.assertIn("FixDt", str(cm.exception))
+
+    def test_print_value_quantity(self):
+        sim = new_sim()
+        out = []
+        run_source(sim, LANGEVIN_SETUP + "FixDt = 1e-13\nRun(1e-12)\nprint(dt)\n", lang="mx3", out=out.append)
+        self.assertAlmostEqual(float(out[-1]), 1e-13)
+
+    def test_dt_is_a_number(self):
+        # mumax3: dt is the float64 Dt_si, usable in arithmetic; TableAdd(dt) still adds the column
+        sim = new_sim()
+        out = []
+        run_source(sim, LANGEVIN_SETUP + """
+        TableAdd(dt)
+        acc := 0.0
+        for i:=0; i<3; i++ { Steps(1); acc += dt }
+        print(acc > 0, dt * 2 > dt)
+        """, lang="mx3", out=out.append)
+        self.assertEqual(out[-1], "True True")   # TableAdd(dt) above raised before the fix
+
+
 if __name__ == "__main__":
     unittest.main()

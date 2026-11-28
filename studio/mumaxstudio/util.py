@@ -79,4 +79,6 @@ def format_value(v):
         return repr(v)
     if isinstance(v, tuple):
         return "(" + ", ".join(format_value(c) for c in v) + ")"
+    if getattr(v, "is_field", True) is False and hasattr(v, "Average"):
+        return format_value(v.Average())  # print(dt), print(E_therm): the number, as mumax3 prints it
     return str(v)
